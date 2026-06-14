@@ -1,0 +1,922 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "SafeRoute API",
+    "description": "API Gateway para el sistema de navegación segura SafeRoute. Proporciona endpoints para autenticación, reportes comunitarios, cálculo de rutas seguras, alertas en tiempo real y dashboard de administración.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Equipo SafeRoute",
+      "email": "dev@saferoute.mx"
+    },
+    "license": {
+      "name": "MIT",
+      "url": "https://opensource.org/licenses/MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://saferoute-api.onrender.com",
+      "description": "Producción - Render"
+    },
+    {
+      "url": "http://localhost:8080",
+      "description": "Desarrollo local"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Autenticación",
+      "description": "Registro y login de usuarios"
+    },
+    {
+      "name": "Reportes",
+      "description": "Creación y consulta de reportes comunitarios"
+    },
+    {
+      "name": "Rutas",
+      "description": "Cálculo de rutas seguras"
+    },
+    {
+      "name": "Admin",
+      "description": "Dashboard de administración de flota"
+    },
+    {
+      "name": "Tiempo Real",
+      "description": "WebSocket para alertas en tiempo real"
+    },
+    {
+      "name": "Sistema",
+      "description": "Health check y monitoreo"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Token JWT obtenido en /api/auth/login. Expira en 24 horas."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Mensaje de error legible",
+            "example": "credenciales inválidas"
+          },
+          "code": {
+            "type": "integer",
+            "description": "Código HTTP del error",
+            "example": 401
+          },
+          "detalle": {
+            "type": "string",
+            "description": "Detalle adicional del error (opcional)",
+            "example": "el token expiró hace 5 minutos"
+          }
+        },
+        "required": ["error", "code"]
+      },
+      "LoginRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Correo electrónico registrado",
+            "example": "conductor@ejemplo.com"
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "description": "Contraseña del usuario",
+            "minLength": 6,
+            "example": "password123"
+          }
+        },
+        "required": ["email", "password"]
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "conductor@ejemplo.com"
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "minLength": 6,
+            "example": "password123"
+          },
+          "nombre": {
+            "type": "string",
+            "description": "Nombre completo del usuario",
+            "example": "Juan Pérez"
+          },
+          "tipo": {
+            "type": "string",
+            "enum": ["conductor", "admin"],
+            "description": "Tipo de usuario: conductor o administrador",
+            "example": "conductor"
+          }
+        },
+        "required": ["email", "password", "nombre", "tipo"]
+      },
+      "AuthResponse": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Token JWT para autenticación",
+            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+          },
+          "expires_in": {
+            "type": "integer",
+            "description": "Tiempo de expiración en segundos",
+            "example": 86400
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID único del usuario",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          },
+          "nombre": {
+            "type": "string",
+            "example": "Juan Pérez"
+          },
+          "tipo": {
+            "type": "string",
+            "enum": ["conductor", "admin"],
+            "example": "conductor"
+          }
+        }
+      },
+      "ReporteRequest": {
+        "type": "object",
+        "properties": {
+          "tipo": {
+            "type": "string",
+            "enum": ["accidente", "inundacion", "bache", "derrumbe", "sin_luz", "otro"],
+            "description": "Tipo de incidente reportado",
+            "example": "inundacion"
+          },
+          "latitud": {
+            "type": "number",
+            "format": "double",
+            "description": "Latitud GPS del incidente",
+            "minimum": 14.0,
+            "maximum": 18.0,
+            "example": 16.753
+          },
+          "longitud": {
+            "type": "number",
+            "format": "double",
+            "description": "Longitud GPS del incidente",
+            "minimum": -94.0,
+            "maximum": -90.0,
+            "example": -93.116
+          },
+          "nota_voz": {
+            "type": "string",
+            "description": "Nota de voz transcrita (opcional). Texto libre que alimenta el NLP.",
+            "maxLength": 500,
+            "example": "El río cubre ambos carriles, solo pasan volteos"
+          },
+          "ruta_id": {
+            "type": "string",
+            "description": "Identificador de la ruta activa",
+            "example": "ruta-001"
+          }
+        },
+        "required": ["tipo", "latitud", "longitud", "ruta_id"]
+      },
+      "ReporteResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          },
+          "tipo": {
+            "type": "string",
+            "example": "inundacion"
+          },
+          "latitud": {
+            "type": "number",
+            "example": 16.753
+          },
+          "longitud": {
+            "type": "number",
+            "example": -93.116
+          },
+          "nota_voz": {
+            "type": "string",
+            "example": "El río cubre ambos carriles"
+          },
+          "ruta_id": {
+            "type": "string",
+            "example": "ruta-001"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-06-14T10:30:00Z"
+          },
+          "vigente": {
+            "type": "boolean",
+            "description": "Si el reporte sigue siendo válido",
+            "example": true
+          },
+          "confirmaciones": {
+            "type": "integer",
+            "description": "Número de conductores que confirmaron el incidente",
+            "minimum": 0,
+            "example": 4
+          }
+        }
+      },
+      "RutasRequest": {
+        "type": "object",
+        "properties": {
+          "origen_lat": {
+            "type": "number",
+            "format": "double",
+            "example": 16.75
+          },
+          "origen_lon": {
+            "type": "number",
+            "format": "double",
+            "example": -93.12
+          },
+          "destino_lat": {
+            "type": "number",
+            "format": "double",
+            "example": 16.72
+          },
+          "destino_lon": {
+            "type": "number",
+            "format": "double",
+            "example": -93.08
+          }
+        },
+        "required": ["origen_lat", "origen_lon", "destino_lat", "destino_lon"]
+      },
+      "RutaResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "ruta-a"
+          },
+          "nombre": {
+            "type": "string",
+            "example": "Por carretera federal"
+          },
+          "seguridad": {
+            "type": "string",
+            "enum": ["verde", "amarillo", "rojo"],
+            "description": "Semáforo de seguridad: verde=segura, amarillo=precaución, rojo=peligrosa",
+            "example": "verde"
+          },
+          "distancia_km": {
+            "type": "number",
+            "example": 32.0
+          },
+          "tiempo_minutos": {
+            "type": "integer",
+            "example": 45
+          },
+          "riesgo_combinado": {
+            "type": "number",
+            "description": "Índice de riesgo combinado (0-1, menor es mejor)",
+            "minimum": 0,
+            "maximum": 1,
+            "example": 0.12
+          },
+          "clusters_atravesados": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "example": [0, 45, 98]
+          }
+        }
+      },
+      "AdminResumenResponse": {
+        "type": "object",
+        "properties": {
+          "total_reportes": {
+            "type": "integer",
+            "example": 200
+          },
+          "topicos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TopicoInfo"
+            }
+          },
+          "resumen_llm": {
+            "type": "string",
+            "description": "Resumen generado por el LLM en lenguaje natural",
+            "example": "Esta semana se registraron 200 incidentes. La situación más crítica son las inundaciones en Suchiapa..."
+          },
+          "fecha_generacion": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-06-14T10:30:00Z"
+          }
+        }
+      },
+      "TopicoInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "example": 0
+          },
+          "nombre": {
+            "type": "string",
+            "example": "🌊 Inundaciones"
+          },
+          "frecuencia": {
+            "type": "integer",
+            "example": 90
+          },
+          "porcentaje": {
+            "type": "number",
+            "example": 45.0
+          },
+          "palabras_clave": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": ["inundación", "agua", "Suchiapa", "km", "lluvia"]
+          },
+          "tendencia": {
+            "type": "string",
+            "enum": ["🔴 Emergente", "🟡 Recurrente", "🟢 Normal", "↓ Disminuyendo", "↑ Nuevo"],
+            "example": "🔴 Emergente"
+          },
+          "accion_sugerida": {
+            "type": "string",
+            "example": "Desviar rutas por libramiento sur"
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          },
+          "version": {
+            "type": "string",
+            "example": "1.0.0"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-06-14T10:30:00Z"
+          },
+          "database": {
+            "type": "string",
+            "enum": ["connected", "disconnected"],
+            "example": "connected"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/auth/register": {
+      "post": {
+        "tags": ["Autenticación"],
+        "summary": "Registrar nuevo usuario",
+        "description": "Crea una cuenta de conductor o administrador. La contraseña se almacena con bcrypt.",
+        "operationId": "register",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              },
+              "example": {
+                "email": "conductor@ejemplo.com",
+                "password": "password123",
+                "nombre": "Juan Pérez",
+                "tipo": "conductor"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Usuario creado exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "example": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "status": {
+                      "type": "string",
+                      "example": "creado"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos de entrada inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El email ya está registrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": ["Autenticación"],
+        "summary": "Iniciar sesión",
+        "description": "Autentica al usuario y devuelve un token JWT válido por 24 horas.",
+        "operationId": "login",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              },
+              "example": {
+                "email": "conductor@ejemplo.com",
+                "password": "password123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login exitoso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            },
+            "headers": {
+              "Set-Cookie": {
+                "description": "Cookie de sesión (opcional)",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Credenciales inválidas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reportes": {
+      "post": {
+        "tags": ["Reportes"],
+        "summary": "Crear reporte de incidente",
+        "description": "Registra un nuevo incidente reportado por un conductor. El campo nota_voz es texto libre opcional que alimenta el motor NLP.",
+        "operationId": "createReporte",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReporteRequest"
+              },
+              "example": {
+                "tipo": "inundacion",
+                "latitud": 16.753,
+                "longitud": -93.116,
+                "nota_voz": "El río cubre ambos carriles, solo pasan volteos",
+                "ruta_id": "ruta-001"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Reporte creado exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReporteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos de entrada inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token no válido o expirado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": ["Reportes"],
+        "summary": "Listar reportes vigentes",
+        "description": "Obtiene los últimos 50 reportes que siguen vigentes, ordenados por fecha.",
+        "operationId": "getReportes",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista de reportes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reportes": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ReporteResponse"
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "example": 50
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token no válido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reportes/{id}/validar": {
+      "put": {
+        "tags": ["Reportes"],
+        "summary": "Validar o descartar un reporte",
+        "description": "Permite a los conductores confirmar que un incidente sigue activo o marcarlo como resuelto. Si vigente=true, incrementa confirmaciones. Si vigente=false, marca el reporte como no vigente.",
+        "operationId": "validarReporte",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "ID del reporte a validar",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "vigente": {
+                    "type": "boolean",
+                    "description": "true = el incidente sigue, false = ya no está",
+                    "example": true
+                  }
+                },
+                "required": ["vigente"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reporte actualizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "actualizado"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Reporte no encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/rutas": {
+      "post": {
+        "tags": ["Rutas"],
+        "summary": "Calcular rutas seguras",
+        "description": "Calcula hasta 3 rutas alternativas entre dos puntos, priorizando seguridad sobre velocidad. Usa el motor de rutas con Dijkstra y pesos de riesgo combinado (DBSCAN + inundaciones).",
+        "operationId": "calcularRutas",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RutasRequest"
+              },
+              "example": {
+                "origen_lat": 16.75,
+                "origen_lon": -93.12,
+                "destino_lat": 16.72,
+                "destino_lon": -93.08
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rutas calculadas exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rutas": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RutaResponse"
+                      }
+                    },
+                    "recomendada": {
+                      "type": "string",
+                      "description": "ID de la ruta recomendada por seguridad",
+                      "example": "ruta-a"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Motor de rutas no disponible (se responde con caché)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "X-Data-Source": {
+                "description": "Indica si los datos vienen del motor o de caché",
+                "schema": {
+                  "type": "string",
+                  "enum": ["motor-rutas", "cache"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/resumen": {
+      "get": {
+        "tags": ["Admin"],
+        "summary": "Obtener resumen del dashboard",
+        "description": "Genera un resumen semanal para el administrador de flota. Incluye tópicos descubiertos por LDA y un resumen en lenguaje natural generado por LLM.",
+        "operationId": "adminResumen",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "semana_inicio",
+            "in": "query",
+            "required": false,
+            "description": "Fecha de inicio de la semana (YYYY-MM-DD)",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "example": "2026-06-08"
+          },
+          {
+            "name": "semana_fin",
+            "in": "query",
+            "required": false,
+            "description": "Fecha de fin de la semana (YYYY-MM-DD)",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "example": "2026-06-14"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resumen generado exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminResumenResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Servicio NLP o LLM no disponible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ws/alertas/{ruta_id}": {
+      "get": {
+        "tags": ["Tiempo Real"],
+        "summary": "WebSocket de alertas en tiempo real",
+        "description": "Conexión WebSocket para recibir alertas en tiempo real cuando se reporta un incidente en una ruta específica. El servidor empuja notificaciones a todos los suscriptores de la ruta.",
+        "operationId": "wsAlertas",
+        "parameters": [
+          {
+            "name": "ruta_id",
+            "in": "path",
+            "required": true,
+            "description": "ID de la ruta a suscribirse",
+            "schema": {
+              "type": "string"
+            },
+            "example": "ruta-001"
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "Conexión WebSocket establecida (Switching Protocols)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tipo": {
+                      "type": "string",
+                      "example": "inundacion"
+                    },
+                    "latitud": {
+                      "type": "number",
+                      "example": 16.753
+                    },
+                    "longitud": {
+                      "type": "number",
+                      "example": -93.116
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time",
+                      "example": "2026-06-14T10:30:00Z"
+                    },
+                    "mensaje": {
+                      "type": "string",
+                      "description": "Mensaje que se muestra al conductor",
+                      "example": "⚠️ Inundación reportada a 2.3 km"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": ["Sistema"],
+        "summary": "Health check del sistema",
+        "description": "Verifica el estado del API Gateway y la conexión a la base de datos.",
+        "operationId": "healthCheck",
+        "responses": {
+          "200": {
+            "description": "Sistema operativo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Base de datos no disponible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "example": {
+                  "status": "degraded",
+                  "version": "1.0.0",
+                  "timestamp": "2026-06-14T10:30:00Z",
+                  "database": "disconnected"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

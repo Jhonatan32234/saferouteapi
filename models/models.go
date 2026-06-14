@@ -1,0 +1,126 @@
+package models
+
+import "time"
+
+// ===== AUTENTICACIÓN =====
+
+type LoginRequest struct {
+    Email    string `json:"email"`
+    Password string `json:"password"`
+}
+
+type RegisterRequest struct {
+    Email    string `json:"email"`
+    Password string `json:"password"`
+    Nombre   string `json:"nombre"`
+    Tipo     string `json:"tipo"` // conductor o admin
+}
+
+type AuthResponse struct {
+    Token     string `json:"token"`
+    ExpiresIn int    `json:"expires_in"`
+    UserID    string `json:"user_id"`
+    Nombre    string `json:"nombre"`
+    Tipo      string `json:"tipo"`
+}
+
+// ===== REPORTES =====
+
+type ReporteRequest struct {
+    Tipo      string  `json:"tipo"`
+    Latitud   float64 `json:"latitud"`
+    Longitud  float64 `json:"longitud"`
+    NotaVoz   string  `json:"nota_voz,omitempty"`
+    RutaID    string  `json:"ruta_id"`
+}
+
+type ReporteResponse struct {
+    ID             string    `json:"id"`
+    Tipo           string    `json:"tipo"`
+    Latitud        float64   `json:"latitud"`
+    Longitud       float64   `json:"longitud"`
+    NotaVoz        string    `json:"nota_voz,omitempty"`
+    RutaID         string    `json:"ruta_id"`
+    Timestamp      time.Time `json:"timestamp"`
+    Vigente        bool      `json:"vigente"`
+    Confirmaciones int       `json:"confirmaciones"`
+}
+
+type BusquedaRequest struct {
+    Query string `json:"query"`
+}
+
+type BusquedaResponse struct {
+    Resultados []ReporteResultado `json:"resultados"`
+    Total      int                `json:"total"`
+}
+
+type ReporteResultado struct {
+    Reporte ReporteResponse `json:"reporte"`
+    Score   float64         `json:"score"`
+}
+
+// ===== RUTAS =====
+
+type RutasRequest struct {
+    OrigenLat   float64 `json:"origen_lat"`
+    OrigenLon   float64 `json:"origen_lon"`
+    DestinoLat  float64 `json:"destino_lat"`
+    DestinoLon  float64 `json:"destino_lon"`
+}
+
+type RutaResponse struct {
+    ID                string   `json:"id"`
+    Nombre            string   `json:"nombre"`
+    DistanciaKM       float64  `json:"distancia_km"`
+    TiempoMinutos     int      `json:"tiempo_minutos"`
+    Seguridad         string   `json:"seguridad"` // verde, amarillo, rojo
+    RiesgoCombinado   float64  `json:"riesgo_combinado"`
+    ClustersAtravesados []int  `json:"clusters_atravesados"`
+}
+
+type RutasResponse struct {
+    Rutas        []RutaResponse `json:"rutas"`
+    Recomendada  string         `json:"recomendada"`
+}
+
+// ===== ADMIN =====
+
+type AdminResumenRequest struct {
+    SemanaInicio string `json:"semana_inicio"`
+    SemanaFin    string `json:"semana_fin"`
+}
+
+type AdminResumenResponse struct {
+    TotalReportes  int              `json:"total_reportes"`
+    Topicos        []TopicoInfo     `json:"topicos"`
+    ResumenLLM     string           `json:"resumen_llm"`
+    FechaGeneracion time.Time       `json:"fecha_generacion"`
+}
+
+type TopicoInfo struct {
+    ID              int      `json:"id"`
+    Nombre          string   `json:"nombre"`
+    Frecuencia      int      `json:"frecuencia"`
+    Porcentaje      float64  `json:"porcentaje"`
+    PalabrasClave   []string `json:"palabras_clave"`
+    Tendencia       string   `json:"tendencia"`
+    AccionSugerida  string   `json:"accion_sugerida"`
+}
+
+// ===== ERRORES =====
+
+type ErrorResponse struct {
+    Error   string `json:"error"`
+    Code    int    `json:"code"`
+    Detalle string `json:"detalle,omitempty"`
+}
+
+// ===== HEALTH =====
+
+type HealthResponse struct {
+    Status    string `json:"status"`
+    Version   string `json:"version"`
+    Timestamp string `json:"timestamp"`
+    Database  string `json:"database"`
+}

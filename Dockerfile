@@ -1,4 +1,4 @@
-# Dockerfile
+# Dockerfile (sin .env)
 FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
@@ -22,7 +22,7 @@ WORKDIR /root/
 
 # Copiar el binario compilado
 COPY --from=builder /app/main .
-COPY --from=builder /app/.env .env
+
 
 # Puerto que expone la aplicación
 EXPOSE 8080

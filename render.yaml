@@ -1,0 +1,31 @@
+# render.yaml
+services:
+  - type: web
+    name: saferoute-api
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: DATABASE_URL
+        fromDatabase:
+          name: saferoute-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MOTOR_RUTAS_URL
+        value: https://saferoute-motor-rutas.onrender.com
+      - key: MOTOR_NLP_URL
+        value: https://saferoute-motor-nlp.onrender.com
+      - key: MOTOR_LLM_URL
+        value: https://saferoute-motor-llm.onrender.com
+      - key: ENVIRONMENT
+        value: production
+
+  - type: postgresql
+    name: saferoute-db
+    plan: free
+    databaseName: saferoute
+    user: saferoute_user

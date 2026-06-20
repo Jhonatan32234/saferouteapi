@@ -49,19 +49,19 @@ func Load() (*Config, error) {
 
     motorRutasURL := os.Getenv("MOTOR_RUTAS_URL")
     if motorRutasURL == "" {
-        motorRutasURL = "https://saferoute-motor-rutas.onrender.com"
+        motorRutasURL = "http://localhost:8000"
         log.Println("⚠️ MOTOR_RUTAS_URL no configurado, usando default:", motorRutasURL)
     }
 
     motorNLPURL := os.Getenv("MOTOR_NLP_URL")
     if motorNLPURL == "" {
-        motorNLPURL = "https://saferoute-motor-nlp.onrender.com"
+        motorNLPURL = "http://localhost:8000"
         log.Println("⚠️ MOTOR_NLP_URL no configurado, usando default:", motorNLPURL)
     }
 
     motorLLMURL := os.Getenv("MOTOR_LLM_URL")
     if motorLLMURL == "" {
-        motorLLMURL = "https://saferoute-motor-llm.onrender.com"
+        motorLLMURL = "http://localhost:8000"
         log.Println("⚠️ MOTOR_LLM_URL no configurado, usando default:", motorLLMURL)
     }
 

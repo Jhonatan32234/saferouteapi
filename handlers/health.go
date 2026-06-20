@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"saferoute/database"
 	"time"
 )
 
@@ -11,13 +12,18 @@ func HealthHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		// Por ahora retornamos un estado simple.
-		// En una fase más avanzada, podrías verificar la conexión a la DB aquí.
+		dbStatus := "connected"
+		if database.DB == nil {
+			dbStatus = "disconnected"
+		} else if err := database.DB.Ping(); err != nil {
+			dbStatus = "error: " + err.Error()
+		}
+
 		response := map[string]interface{}{
 			"status":    "ok",
 			"version":   "1.0.0",
 			"timestamp": time.Now().Format(time.RFC3339),
-			"database":  "connected",
+			"database":  dbStatus,
 		}
 
 		json.NewEncoder(w).Encode(response)

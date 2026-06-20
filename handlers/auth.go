@@ -12,6 +12,7 @@ import (
     "saferoute/models"
 )
 
+
 func LoginHandler(jwtSecret string) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var req models.LoginRequest

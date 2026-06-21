@@ -47,6 +47,14 @@ func main() {
     httpRouter.Use(middleware.LoggingMiddleware)
     httpRouter.Use(middleware.RateLimitMiddleware(limiter))
 
+    interno := httpRouter.PathPrefix("/api/internal").Subrouter()
+    interno.Use(middleware.InternalAPIKeyMiddleware)
+
+    interno.HandleFunc("/reportes", handlers.GetReportesHandler()).Methods("GET")
+    interno.HandleFunc("/reportes/cercanos", handlers.GetReportesCercanosHandler()).Methods("GET")
+    interno.HandleFunc("/reportes/estadisticas", handlers.GetEstadisticasHandler()).Methods("GET")
+    interno.HandleFunc("/reportes/{id}", handlers.GetReporteHandler()).Methods("GET")
+
     // Documentación
     httpRouter.PathPrefix("/docs/").Handler(http.StripPrefix("/docs/", http.FileServer(http.Dir("static"))))
     httpRouter.HandleFunc("/api/docs", func(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +87,10 @@ func main() {
 
     api.HandleFunc("/user/zonas", handlers.ActualizarZonasUsuarioHandler()).Methods("POST")
     api.HandleFunc("/user/zonas", handlers.ObtenerZonasUsuarioHandler()).Methods("GET")
+
+    // Predicciones (NUEVO)
+api.HandleFunc("/predicciones/zonas", handlers.ProxyHandler(cfg.MotorPrediccionesURL+"/predicciones/zonas")).Methods("POST")
+api.HandleFunc("/predicciones/perfil", handlers.ProxyHandler(cfg.MotorPrediccionesURL+"/predicciones/perfil")).Methods("POST")
 
     // Reportes
     api.HandleFunc("/reportes", handlers.CreateReporteHandler()).Methods("POST")

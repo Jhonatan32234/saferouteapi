@@ -17,6 +17,9 @@ type Config struct {
     MotorLLMURL   string
     Environment   string
     RateLimit     RateLimitConfig
+    InternalAPIKey string  // NUEVO
+    MotorPrediccionesURL  string  // NUEVO
+
 }
 
 type RateLimitConfig struct {
@@ -70,6 +73,15 @@ func Load() (*Config, error) {
         environment = "development"
     }
 
+    internal_api_key := os.Getenv("INTERNAL_API_KEY")
+    if internal_api_key == "" {
+        internal_api_key = "api_key_de_prueba"
+    }
+
+    motor_predicciones_url := os.Getenv("MOTOR_PREDICCIONES_URL")
+    if motor_predicciones_url == ""{
+        motor_predicciones_url = "localhost:8080"
+    }
     // Configuración de rate limit
     requestsPerSecond, _ := strconv.Atoi(os.Getenv("RATE_LIMIT_REQUESTS"))
     if requestsPerSecond == 0 {
@@ -93,5 +105,6 @@ func Load() (*Config, error) {
             RequestsPerSecond: requestsPerSecond,
             Burst:             burst,
         },
+        InternalAPIKey: internal_api_key,
     }, nil
 }

@@ -324,7 +324,6 @@ func GetReportesCercanosHandler() http.HandlerFunc {
         incidentes := make([]models.IncidenteCercano, 0)
         for rows.Next() {
             var inc models.IncidenteCercano
-            print(inc.NotaVoz)
             if err := rows.Scan(&inc.ID, &inc.Tipo, &inc.Latitud, &inc.Longitud,
                 &inc.NotaVoz, &inc.RutaID, &inc.Timestamp,
                 &inc.Confirmaciones, &inc.DistanciaKm,

@@ -6,7 +6,62 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"saferoute/database"
+
+	"golang.org/x/crypto/bcrypt"
 )
+
+// En handlers/admin.go
+
+func RegistrarConductorHandler() http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+            Email    string `json:"email"`
+            Password string `json:"password"`
+            Nombre   string `json:"nombre"`
+            Telefono string `json:"telefono"`
+        }
+        
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+            writeError(w, http.StatusBadRequest, "datos inválidos")
+            return
+        }
+        
+        if req.Email == "" || req.Password == "" || req.Nombre == "" {
+            writeError(w, http.StatusBadRequest, "email, password y nombre requeridos")
+            return
+        }
+        
+        // Hash de contraseña
+        hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+        if err != nil {
+            writeError(w, http.StatusInternalServerError, "error procesando contraseña")
+            return
+        }
+        
+        // Insertar como conductor
+        var id string
+        err = database.DB.QueryRow(
+            `INSERT INTO usuarios (email, password_hash, nombre, tipo, telefono) 
+             VALUES ($1, $2, $3, 'conductor', $4) 
+             RETURNING id`,
+            req.Email, string(hashedPassword), req.Nombre, req.Telefono,
+        ).Scan(&id)
+        
+        if err != nil {
+            writeError(w, http.StatusConflict, "el email ya está registrado")
+            return
+        }
+        
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusCreated)
+        json.NewEncoder(w).Encode(map[string]string{
+            "id":     id,
+            "status": "conductor registrado",
+            "email":  req.Email,
+        })
+    }
+}
 
 func GetAdminResumenHandler(motorNLPURL string, motorLLMURL string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

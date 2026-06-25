@@ -120,6 +120,8 @@ func main() {
 
 	apiAdmin.HandleFunc("/resumen", handlers.GetAdminResumenHandler(cfg.MotorNLPURL, cfg.MotorLLMURL)).Methods("GET")
 	apiAdmin.HandleFunc("/buscar", handlers.BuscarReportesHandler(cfg.MotorNLPURL)).Methods("POST")
+	// Admin endpoints (solo admin)
+	apiAdmin.HandleFunc("/registrar-conductor", handlers.RegistrarConductorHandler()).Methods("POST")
 
 	// ==========================================
 	// DEBUG

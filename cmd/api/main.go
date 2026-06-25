@@ -141,6 +141,7 @@ func main() {
 			"http://localhost:3000",
 			"http://127.0.0.1:8080",
 			"http://127.0.0.1:3000",
+			"http://localhost:5173",
 			"https://saferoute-api-m4i5.onrender.com",
 			"null", // Para archivos HTML locales (dashboard)
 		},

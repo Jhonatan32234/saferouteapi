@@ -17,403 +17,556 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
-    CheckOrigin: func(r *http.Request) bool {
-        return true
-    },
-    HandshakeTimeout: 10 * time.Second,
-    ReadBufferSize:   1024,
-    WriteBufferSize:  1024,
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+	HandshakeTimeout: 10 * time.Second,
+	ReadBufferSize:   1024,
+	WriteBufferSize:  1024,
 }
 
 var (
-    suscriptores           = make(map[string]map[*websocket.Conn]bool)
-    suscriptoresPorUsuario = make(map[string]map[string]bool)
-    subMu                  sync.RWMutex
-    jwtSecret              string // Guardar el secret para usar en el handler
-
+	suscriptores           = make(map[string]map[*websocket.Conn]bool)
+	suscriptoresPorUsuario = make(map[string]map[string]bool)
+	subMu                  sync.RWMutex
+	jwtSecret              string
 )
 
+// ============================================================
+// NUEVO: Tipos de mensaje WebSocket
+// ============================================================
+const (
+	MsgTelemetria       = "telemetria"
+	MsgAlertaProximidad = "alerta_proximidad"
+	MsgConfirmacion     = "confirmacion"
+	MsgEstadoConductor  = "estado_conductor"
+	MsgSyncPendientes   = "sync_pendientes"
+	MsgHistorialInicial = "historial_inicial"
+	MsgNuevoReporte     = "nuevo_reporte"
+)
+
+// MensajeTelemetria representa datos GPS en tiempo real
+type MensajeTelemetria struct {
+	Tipo      string  `json:"tipo"`
+	Lat       float64 `json:"lat"`
+	Lon       float64 `json:"lon"`
+	Velocidad float64 `json:"velocidad_kmh,omitempty"`
+	RutaID    string  `json:"ruta_id"`
+	Timestamp string  `json:"timestamp"`
+}
+
+// MensajeConfirmacion representa validación de un reporte
+type MensajeConfirmacion struct {
+	Tipo       string `json:"tipo"`
+	ReporteID  string `json:"reporte_id"`
+	Vigente    bool   `json:"vigente"`
+	UserID     string `json:"user_id"`
+	Timestamp  string `json:"timestamp"`
+}
+
+// MensajeEntrante es cualquier mensaje que llega del cliente
+type MensajeEntrante struct {
+	Tipo      string  `json:"tipo"`
+	Lat       float64 `json:"lat,omitempty"`
+	Lon       float64 `json:"lon,omitempty"`
+	Velocidad float64 `json:"velocidad_kmh,omitempty"`
+	RutaID    string  `json:"ruta_id,omitempty"`
+	Timestamp string  `json:"timestamp,omitempty"`
+	ReporteID string  `json:"reporte_id,omitempty"`
+	Vigente   *bool   `json:"vigente,omitempty"`
+	Estado    string  `json:"estado,omitempty"`
+	Reportes  []interface{} `json:"reportes_pendientes,omitempty"`
+}
 
 func SetJWTSecret(secret string) {
-    jwtSecret = secret
+	jwtSecret = secret
 }
 
-
-// handlers/websocket.go - WebSocketHandler mejorado
+// ============================================================
+// WebSocketHandler - Multimensaje
+// ============================================================
 
 func WebSocketHandler() http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        rutaID := mux.Vars(r)["ruta_id"]
-        
-        // Obtener user_id
-        userID := r.URL.Query().Get("user_id")
-        if userID == "" {
-            authHeader := r.Header.Get("Authorization")
-            if authHeader != "" && len(authHeader) > 7 {
-                token := authHeader[7:]
-                if jwtSecret != "" {
-                    if claims, err := middleware.ValidateToken(token, jwtSecret); err == nil {
-                        if uid, ok := claims["user_id"].(string); ok {
-                            userID = uid
-                        }
-                    }
-                }
-            }
-        }
-        
-        if userID == "" {
-            userID = "anonimo"
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		rutaID := mux.Vars(r)["ruta_id"]
 
-        log.Printf("🔌 [WS] Nueva conexión: User=%s, Ruta=%s", userID, rutaID)
+		// Autenticación
+		userID := r.URL.Query().Get("user_id")
+		if userID == "" {
+			authHeader := r.Header.Get("Authorization")
+			if authHeader != "" && len(authHeader) > 7 {
+				token := authHeader[7:]
+				if jwtSecret != "" {
+					if claims, err := middleware.ValidateToken(token, jwtSecret); err == nil {
+						if uid, ok := claims["user_id"].(string); ok {
+							userID = uid
+						}
+					}
+				}
+			}
+		}
 
-        // === IMPORTANTE: Guardar suscripción en BD ===
-        if userID != "anonimo" {
-            log.Printf("💾 [WS] Guardando suscripción para usuario %s en ruta %s", userID, rutaID)
-            
-            if database.DB != nil {
-                _, err := database.DB.Exec(
-                    `INSERT INTO suscripciones_rutas (user_id, ruta_id, suscrito, fecha_suscripcion, fecha_actualizacion)
-                     VALUES ($1, $2, true, NOW(), NOW())
-                     ON CONFLICT (user_id, ruta_id) 
-                     DO UPDATE SET 
-                        suscrito = true, 
-                        fecha_actualizacion = NOW()`,
-                    userID, rutaID,
-                )
-                if err != nil {
-                    log.Printf("❌ [WS] Error guardando suscripción: %v", err)
-                } else {
-                    log.Printf("✅ [WS] Suscripción guardada para usuario %s en ruta %s", userID, rutaID)
-                }
-            }
-        }
+		if userID == "" {
+			userID = "anonimo"
+		}
 
-        // Upgrade a WebSocket
-        conn, err := upgrader.Upgrade(w, r, nil)
-        if err != nil {
-            log.Printf("❌ [WS] Error upgrading: %v", err)
-            return
-        }
-        defer conn.Close()
+		log.Printf("🔌 [WS] Nueva conexión: User=%s, Ruta=%s", userID, rutaID)
 
-        // Registrar en memoria
-        subMu.Lock()
-        if suscriptores[rutaID] == nil {
-            suscriptores[rutaID] = make(map[*websocket.Conn]bool)
-        }
-        suscriptores[rutaID][conn] = true
+		// Guardar suscripción en BD
+		if userID != "anonimo" && userID != "admin" && database.DB != nil {
+		    _, err := database.DB.Exec(
+		        `INSERT INTO suscripciones_rutas (user_id, ruta_id, suscrito, fecha_suscripcion, fecha_actualizacion)
+		         VALUES ($1, $2, true, NOW(), NOW())
+		         ON CONFLICT (user_id, ruta_id) 
+		         DO UPDATE SET suscrito = true, fecha_actualizacion = NOW()`,
+		        userID, rutaID,
+		    )
+		    if err != nil {
+		        log.Printf("⚠️ [WS] No se guardó suscripción (user_id no es UUID): %v", err)
+		    }
+		}
 
-        if suscriptoresPorUsuario[userID] == nil {
-            suscriptoresPorUsuario[userID] = make(map[string]bool)
-        }
-        suscriptoresPorUsuario[userID][rutaID] = true
-        subMu.Unlock()
+		// Upgrade
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Printf("❌ [WS] Error upgrading: %v", err)
+			return
+		}
+		defer func() {
+			conn.Close()
+			// Limpiar al desconectar
+			subMu.Lock()
+			delete(suscriptores[rutaID], conn)
+			if len(suscriptores[rutaID]) == 0 {
+				delete(suscriptores, rutaID)
+			}
+			if suscriptoresPorUsuario[userID] != nil {
+				delete(suscriptoresPorUsuario[userID], rutaID)
+				if len(suscriptoresPorUsuario[userID]) == 0 {
+					delete(suscriptoresPorUsuario, userID)
+				}
+			}
+			subMu.Unlock()
+			log.Printf("🔌 [WS] Usuario %s desconectado de ruta %s", userID, rutaID)
+		}()
 
-        log.Printf("✅ [WS] Usuario %s registrado en ruta %s. Total conexiones: %d",
-            userID, rutaID, len(suscriptores[rutaID]))
+		// Registrar en memoria
+		subMu.Lock()
+		if suscriptores[rutaID] == nil {
+			suscriptores[rutaID] = make(map[*websocket.Conn]bool)
+		}
+		suscriptores[rutaID][conn] = true
 
-        // Enviar historial reciente
-        if userID != "anonimo" {
-            go enviarHistorialReciente(userID, conn)
-        }
+		if suscriptoresPorUsuario[userID] == nil {
+			suscriptoresPorUsuario[userID] = make(map[string]bool)
+		}
+		suscriptoresPorUsuario[userID][rutaID] = true
+		subMu.Unlock()
 
-        // Mantener conexión
-        for {
-            _, _, err := conn.ReadMessage()
-            if err != nil {
-                subMu.Lock()
-                delete(suscriptores[rutaID], conn)
-                if len(suscriptores[rutaID]) == 0 {
-                    delete(suscriptores, rutaID)
-                }
-                delete(suscriptoresPorUsuario[userID], rutaID)
-                if len(suscriptoresPorUsuario[userID]) == 0 {
-                    delete(suscriptoresPorUsuario, userID)
-                }
-                subMu.Unlock()
-                log.Printf("🔌 [WS] Usuario %s desconectado de ruta %s", userID, rutaID)
-                break
-            }
-        }
-    }
+		log.Printf("✅ [WS] Usuario %s registrado. Total conexiones: %d", userID, len(suscriptores[rutaID]))
+
+		if rutaID == "admin-monitor" {
+    		go func() {
+		        ticker := time.NewTicker(30 * time.Second)
+		        defer ticker.Stop()
+		        for range ticker.C {
+		            if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+		                return
+		            }
+		        }
+		    }()
+		}
+
+		// Enviar historial inicial
+		if userID != "anonimo" {
+			go enviarHistorialReciente(userID, conn)
+		}
+
+		// ============================================================
+		// BUCLE PRINbraCIPAL: LEER MENSAJES DEL CLIENTE
+		// ============================================================
+		for {
+			_, messageBytes, err := conn.ReadMessage()
+			if err != nil {
+				log.Printf("[WS] Error lectura (desconexión): %v", err)
+				break
+			}
+
+			// Parsear mensaje
+			var msg MensajeEntrante
+			if err := json.Unmarshal(messageBytes, &msg); err != nil {
+				log.Printf("⚠️ [WS] Mensaje inválido de %s: %v", userID, err)
+				continue
+			}
+			fmt.Print(msg)
+
+			switch msg.Tipo {
+			// ============================================================
+			// TELEMETRÍA: El conductor envía su ubicación periódicamente
+			// ============================================================
+			case MsgTelemetria:
+		    log.Printf("📍 [TELEMETRÍA] User=%s Lat=%.6f Lon=%.6f Vel=%.0f km/h Ruta=%s",
+		        userID, msg.Lat, msg.Lon, msg.Velocidad, msg.RutaID)
+					
+		    // 1. Actualizar ubicación (omitir si user_id no es UUID)
+		    if userID != "admin" && userID != "anonimo" && database.DB != nil {
+		        _, err := database.DB.Exec(
+		            `INSERT INTO zonas_usuario (user_id, zona_nombre, latitud, longitud, radio_km, activo, fecha_actualizacion)
+		             VALUES ($1, 'ubicacion_actual', $2, $3, 15.0, true, NOW())
+		             ON CONFLICT (user_id, zona_nombre)
+		             DO UPDATE SET latitud = $2, longitud = $3, fecha_actualizacion = NOW()`,
+		            userID, msg.Lat, msg.Lon,
+		        )
+		        if err != nil {
+		            log.Printf("⚠️ [TELEMETRÍA] No se actualizó ubicación (user_id no es UUID): %v", err)
+		        }
+		    }
+		
+		    // 2. Buscar reportes cercanos y notificar al conductor
+		    if database.DB != nil {
+		        go verificarProximidadYNotificar(userID, msg.Lat, msg.Lon, msg.RutaID, conn)
+		    }
+		
+		    // 3. Confirmar recepción al emisor
+		    resp := map[string]interface{}{
+		        "tipo":      "telemetria_ack",
+		        "status":    "ok",
+		        "timestamp": time.Now().UTC().Format(time.RFC3339),
+		    }
+		    conn.WriteJSON(resp)
+		
+		    // ============================================================
+		    // NUEVO: Retransmitir telemetría a todos los admin-monitor
+		    // ============================================================
+		    subMu.RLock()
+		    if adminConns, ok := suscriptores["admin-monitor"]; ok {
+		        telemetriaMsg := map[string]interface{}{
+		            "tipo":            "telemetria",
+		            "user_id":         userID,
+		            "lat":             msg.Lat,
+		            "lon":             msg.Lon,
+		            "velocidad_kmh":   msg.Velocidad,
+		            "ruta_id":         msg.RutaID,
+		            "timestamp":       msg.Timestamp,
+		        }
+		        telemetriaBytes, _ := json.Marshal(telemetriaMsg)
+		        for adminConn := range adminConns {
+		            if adminConn != conn { // No reenviar al mismo que envió
+		                adminConn.WriteMessage(websocket.TextMessage, telemetriaBytes)
+		            }
+		        }
+		    }
+		    subMu.RUnlock()
+
+			// ============================================================
+			// CONFIRMACIÓN: El conductor valida/descarta un reporte
+			// ============================================================
+			case MsgConfirmacion:
+				log.Printf("✅ [CONFIRMACIÓN] User=%s Reporte=%s Vigente=%v",
+					userID, msg.ReporteID, msg.Vigente != nil && *msg.Vigente)
+
+				if msg.ReporteID != "" && database.DB != nil {
+					vigente := false
+					if msg.Vigente != nil {
+						vigente = *msg.Vigente
+					}
+
+					if vigente {
+						database.DB.Exec(
+							"UPDATE reportes SET confirmaciones = confirmaciones + 1 WHERE id = $1",
+							msg.ReporteID,
+						)
+					} else {
+						database.DB.Exec(
+							"UPDATE reportes SET vigente = FALSE WHERE id = $1",
+							msg.ReporteID,
+						)
+					}
+
+					resp := map[string]interface{}{
+						"tipo":       "confirmacion_ack",
+						"status":     "ok",
+						"reporte_id": msg.ReporteID,
+						"vigente":    vigente,
+					}
+					conn.WriteJSON(resp)
+				}
+
+			// ============================================================
+			// ESTADO DEL CONDUCTOR
+			// ============================================================
+			case MsgEstadoConductor:
+				log.Printf("🚦 [ESTADO] User=%s Estado=%s", userID, msg.Estado)
+
+				// Broadcast a administradores u otros conductores
+				if msg.Estado == "emergencia" {
+					alerta := models.NotificacionAlerta{
+						Tipo:      "emergencia_conductor",
+						ReporteID: "",
+						Latitud:   msg.Lat,
+						Longitud:  msg.Lon,
+						NotaVoz:   fmt.Sprintf("Conductor %s marcó emergencia", userID),
+						RutaID:    msg.RutaID,
+						Timestamp: time.Now().UTC(),
+						Mensaje:   fmt.Sprintf("🚨 Conductor %s necesita ayuda", userID),
+					}
+					go BroadcastNotificacion(alerta)
+				}
+
+			// ============================================================
+			// SYNC: Reportes pendientes guardados offline
+			// ============================================================
+			case MsgSyncPendientes:
+				log.Printf("📤 [SYNC] User=%s enviando %d reportes pendientes", userID, len(msg.Reportes))
+				subidos := 0
+				for _, repRaw := range msg.Reportes {
+					rep, ok := repRaw.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					// Insertar reporte
+					tipo, _ := rep["tipo"].(string)
+					lat, _ := rep["latitud"].(float64)
+					lon, _ := rep["longitud"].(float64)
+					nota, _ := rep["nota_voz"].(string)
+					ruta, _ := rep["ruta_id"].(string)
+
+					if tipo != "" && lat != 0 && lon != 0 {
+						_, err := database.DB.Exec(
+							`INSERT INTO reportes (user_id, tipo, latitud, longitud, nota_voz, ruta_id)
+							 VALUES ($1, $2, $3, $4, $5, $6)`,
+							userID, tipo, lat, lon, nota, ruta,
+						)
+						if err == nil {
+							subidos++
+						}
+					}
+				}
+
+				resp := map[string]interface{}{
+					"tipo":    "sync_ack",
+					"subidos": subidos,
+					"total":   len(msg.Reportes),
+				}
+				conn.WriteJSON(resp)
+
+			default:
+				log.Printf("⚠️ [WS] Tipo de mensaje desconocido: %s", msg.Tipo)
+			}
+		}
+	}
 }
 
+// ============================================================
+// VERIFICAR PROXIMIDAD Y NOTIFICAR
+// ============================================================
 
-// NotificarSuscriptores envía notificación a todos los suscriptores de una ruta
+func verificarProximidadYNotificar(userID string, lat, lon float64, rutaID string, conn *websocket.Conn) {
+	rows, err := database.DB.Query(
+		`SELECT id, tipo, latitud, longitud, COALESCE(nota_voz,''), ruta_id, confirmaciones, timestamp
+		 FROM reportes 
+		 WHERE vigente = TRUE 
+		 AND (6371 * acos(cos(radians($1)) * cos(radians(latitud)) * 
+		      cos(radians(longitud) - radians($2)) + 
+		      sin(radians($1)) * sin(radians(latitud)))) <= 5
+		 ORDER BY timestamp DESC LIMIT 5`,
+		lat, lon,
+	)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, tipo, notaVoz, rutaRep string
+		var latRep, lonRep float64
+		var confirmaciones int
+		var timestamp time.Time
+
+		rows.Scan(&id, &tipo, &latRep, &lonRep, &notaVoz, &rutaRep, &confirmaciones, &timestamp)
+
+		alerta := map[string]interface{}{
+			"tipo":           MsgAlertaProximidad,
+			"reporte_id":     id,
+			"tipo_incidente": tipo,
+			"lat":            latRep,
+			"lon":            lonRep,
+			"nota_voz":       notaVoz,
+			"confirmaciones": confirmaciones,
+			"timestamp":      timestamp,
+			"mensaje":        fmt.Sprintf("⚠️ %s reportado cerca de tu ubicación", formatearTipoWS(tipo)),
+		}
+		conn.WriteJSON(alerta)
+	}
+}
+
+func formatearTipoWS(tipo string) string {
+	nombres := map[string]string{
+		"accidente": "Accidente", "inundacion": "Inundación",
+		"bache": "Bache", "derrumbe": "Derrumbe",
+		"bloqueo": "Bloqueo", "sin_luz": "Falta de luz",
+		"niebla": "Niebla",
+	}
+	if n, ok := nombres[tipo]; ok {
+		return n
+	}
+	return tipo
+}
+
+// ============================================================
+// FUNCIONES EXISTENTES (mantener)
+// ============================================================
+
 func NotificarSuscriptores(rutaID string, data interface{}) {
-    subMu.RLock()
-    defer subMu.RUnlock()
+	subMu.RLock()
+	defer subMu.RUnlock()
 
-    if suscriptores[rutaID] == nil {
-        return
-    }
+	if suscriptores[rutaID] == nil {
+		return
+	}
 
-    msg, err := json.Marshal(data)
-    if err != nil {
-        log.Printf("❌ [NOTIFICAR] Error marshaling: %v", err)
-        return
-    }
+	msg, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
 
-    count := 0
-    for conn := range suscriptores[rutaID] {
-        if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-            log.Printf("❌ [NOTIFICAR] Error enviando a conexión: %v", err)
-        } else {
-            count++
-        }
-    }
-    log.Printf("📨 [NOTIFICAR] Notificación enviada a %d/%d conexiones en ruta %s", 
-        count, len(suscriptores[rutaID]), rutaID)
+	for conn := range suscriptores[rutaID] {
+		conn.WriteMessage(websocket.TextMessage, msg)
+	}
 }
-
-
-
-// handlers/websocket.go - BroadcastNotificacion mejorado con zonas
 
 func BroadcastNotificacion(notificacion models.NotificacionAlerta) {
-    log.Printf("📡 [BROADCAST] Iniciando broadcast para reporte en (%.6f, %.6f)", 
-        notificacion.Latitud, notificacion.Longitud)
-    
-    db := database.GetDB()
-    if db == nil {
-        log.Printf("❌ [BROADCAST] Base de datos no conectada")
-        return
-    }
-    
-    // ==========================================
-    // NUEVO: Buscar usuarios por zona geográfica
-    // ==========================================
-    query := `
-        SELECT DISTINCT zu.user_id 
-        FROM zonas_usuario zu
-        WHERE zu.activo = true
-        AND (6371 * acos(
-            cos(radians($1)) * cos(radians(zu.latitud)) * 
-            cos(radians(zu.longitud) - radians($2)) + 
-            sin(radians($1)) * sin(radians(zu.latitud))
-        )) <= zu.radio_km
-    `
-    
-    log.Printf("📝 [BROADCAST] Buscando usuarios en zona cercana a (%.6f, %.6f) radio 15km", 
-        notificacion.Latitud, notificacion.Longitud)
-    
-    rows, err := db.Query(query, notificacion.Latitud, notificacion.Longitud)
-    if err != nil {
-        log.Printf("❌ [BROADCAST] Error obteniendo usuarios por zona: %v", err)
-        return
-    }
-    defer rows.Close()
+	log.Printf("📡 [BROADCAST] Broadcast para reporte en (%.6f, %.6f)", notificacion.Latitud, notificacion.Longitud)
 
-    var userIDs []string
-    for rows.Next() {
-        var userID string
-        if err := rows.Scan(&userID); err != nil {
-            log.Printf("⚠️ [BROADCAST] Error escaneando: %v", err)
-            continue
-        }
-        userIDs = append(userIDs, userID)
-        log.Printf("  👤 [BROADCAST] Usuario en zona: %s", userID)
-    }
+	db := database.GetDB()
+	if db == nil {
+		return
+	}
 
-    // ==========================================
-    // TAMBIÉN: Buscar suscriptores por ruta exacta (fallback)
-    // ==========================================
-    if notificacion.RutaID != "" {
-        rows2, err := db.Query(
-            "SELECT user_id FROM suscripciones_rutas WHERE ruta_id = $1 AND suscrito = true",
-            notificacion.RutaID,
-        )
-        if err == nil {
-            for rows2.Next() {
-                var userID string
-                if err := rows2.Scan(&userID); err == nil {
-                    // Evitar duplicados
-                    encontrado := false
-                    for _, id := range userIDs {
-                        if id == userID {
-                            encontrado = true
-                            break
-                        }
-                    }
-                    if !encontrado {
-                        userIDs = append(userIDs, userID)
-                        log.Printf("  👤 [BROADCAST] Usuario suscrito a ruta: %s", userID)
-                    }
-                }
-            }
-            rows2.Close()
-        }
-    }
+	// Buscar usuarios por zona geográfica
+	rows, err := db.Query(
+		`SELECT DISTINCT zu.user_id 
+		 FROM zonas_usuario zu
+		 WHERE zu.activo = true
+		 AND (6371 * acos(cos(radians($1)) * cos(radians(zu.latitud)) * 
+		      cos(radians(zu.longitud) - radians($2)) + 
+		      sin(radians($1)) * sin(radians(zu.latitud)))) <= zu.radio_km`,
+		notificacion.Latitud, notificacion.Longitud,
+	)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
 
-    log.Printf("👥 [BROADCAST] Total usuarios a notificar: %d", len(userIDs))
+	var userIDs []string
+	for rows.Next() {
+		var uid string
+		rows.Scan(&uid)
+		userIDs = append(userIDs, uid)
+	}
 
-    // Guardar en historial de cada usuario
-    for i, userID := range userIDs {
-        log.Printf("  💾 [BROADCAST] [%d/%d] Guardando para usuario %s", i+1, len(userIDs), userID)
-        if err := GuardarNotificacion(userID, notificacion); err != nil {
-            log.Printf("  ❌ [BROADCAST] Error guardando para %s: %v", userID, err)
-        } else {
-            log.Printf("  ✅ [BROADCAST] Guardado para %s", userID)
-        }
-    }
+	// Guardar en historial
+	for _, uid := range userIDs {
+		GuardarNotificacion(uid, notificacion)
+	}
 
-    // Notificar en tiempo real
-    log.Printf("📨 [BROADCAST] Enviando en tiempo real...")
-    
-    // Notificar a usuarios conectados (en cualquier ruta)
-    subMu.RLock()
-    for userID, rutas := range suscriptoresPorUsuario {
-        // Verificar si el usuario está en la lista de destinatarios
-        destinatario := false
-        for _, id := range userIDs {
-            if id == userID {
-                destinatario = true
-                break
-            }
-        }
-        
-        if !destinatario {
-            continue
-        }
-        
-        // Enviar a todas las conexiones activas del usuario
-        for rutaID := range rutas {
-            if conns, ok := suscriptores[rutaID]; ok {
-                msg, _ := json.Marshal(notificacion)
-                for conn := range conns {
-                    if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-                        log.Printf("❌ [BROADCAST] Error enviando a %s: %v", userID, err)
-                    } else {
-                        log.Printf("✅ [BROADCAST] Enviado a %s", userID)
-                    }
-                }
-            }
-        }
-    }
-    subMu.RUnlock()
-    
-    log.Printf("✅ [BROADCAST] Broadcast completado para %d usuarios", len(userIDs))
+	// Notificar en tiempo real
+	subMu.RLock()
+	for uid, rutas := range suscriptoresPorUsuario {
+		esDestinatario := false
+		for _, id := range userIDs {
+			if id == uid {
+				esDestinatario = true
+				break
+			}
+		}
+		if !esDestinatario {
+			continue
+		}
+
+		msg, _ := json.Marshal(notificacion)
+		for rutaID := range rutas {
+			if conns, ok := suscriptores[rutaID]; ok {
+				for conn := range conns {
+					conn.WriteMessage(websocket.TextMessage, msg)
+				}
+			}
+		}
+	}
+	subMu.RUnlock()
 }
-// handlers/websocket.go - GuardarNotificacion CORREGIDO
 
 func GuardarNotificacion(userID string, notificacion models.NotificacionAlerta) error {
-    if err := database.EnsureConnection(); err != nil {
-        return fmt.Errorf("error de conexión: %v", err)
-    }
-    
-    db := database.GetDB()
-    if db == nil {
-        return fmt.Errorf("base de datos no conectada")
-    }
+	if database.DB == nil {
+		return fmt.Errorf("base de datos no conectada")
+	}
 
-    log.Printf("  💾 [GUARDAR] Insertando notificación para usuario %s", userID)
-
-    var id string
-    err := database.DB.QueryRow(
-        `INSERT INTO notificaciones_historial 
-         (user_id, tipo, reporte_id, latitud, longitud, nota_voz, ruta_id, mensaje, fecha_envio)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-         RETURNING id`,
-        userID, notificacion.Tipo, notificacion.ReporteID,
-        notificacion.Latitud, notificacion.Longitud,
-        notificacion.NotaVoz, notificacion.RutaID,
-        notificacion.Mensaje,
-    ).Scan(&id)
-
-    if err != nil {
-        log.Printf("  ❌ [GUARDAR] Error guardando para usuario %s: %v", userID, err)
-        return err
-    }
-
-    log.Printf("  ✅ [GUARDAR] Notificación guardada con ID %s para usuario %s", id, userID)
-    return nil
+	_, err := database.DB.Exec(
+		`INSERT INTO notificaciones_historial 
+		 (user_id, tipo, reporte_id, latitud, longitud, nota_voz, ruta_id, mensaje, fecha_envio)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+		userID, notificacion.Tipo, notificacion.ReporteID,
+		notificacion.Latitud, notificacion.Longitud,
+		notificacion.NotaVoz, notificacion.RutaID,
+		notificacion.Mensaje,
+	)
+	return err
 }
 
-// enviarHistorialReciente envía notificaciones no leídas
 func enviarHistorialReciente(userID string, conn *websocket.Conn) {
-    db := database.GetDB()
-    if db == nil {
-        log.Printf("❌ [HISTORIAL] Base de datos no conectada")
-        return
-    }
+	db := database.GetDB()
+	if db == nil {
+		return
+	}
 
-    rows, err := db.Query(
-        `SELECT id, tipo, reporte_id, latitud, longitud, nota_voz, 
-                ruta_id, mensaje, fecha_envio
-         FROM notificaciones_historial 
-         WHERE user_id = $1 AND leida = false
-         ORDER BY fecha_envio DESC LIMIT 10`,
-        userID,
-    )
-    if err != nil {
-        log.Printf("❌ [HISTORIAL] Error consultando historial: %v", err)
-        return
-    }
-    defer rows.Close()
+	rows, err := db.Query(
+		`SELECT id, tipo, COALESCE(reporte_id,''), latitud, longitud, 
+		        COALESCE(nota_voz,''), ruta_id, mensaje, fecha_envio
+		 FROM notificaciones_historial 
+		 WHERE user_id = $1 AND leida = false
+		 ORDER BY fecha_envio DESC LIMIT 10`,
+		userID,
+	)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
 
-    var notificaciones []map[string]interface{}
-    for rows.Next() {
-        var n struct {
-            ID         string
-            Tipo       string
-            ReporteID  string
-            Latitud    float64
-            Longitud   float64
-            NotaVoz    string
-            RutaID     string
-            Mensaje    string
-            FechaEnvio time.Time
-        }
-        err := rows.Scan(&n.ID, &n.Tipo, &n.ReporteID, &n.Latitud,
-            &n.Longitud, &n.NotaVoz, &n.RutaID, &n.Mensaje, &n.FechaEnvio)
-        if err != nil {
-            continue
-        }
+	var notificaciones []map[string]interface{}
+	for rows.Next() {
+		var id, tipo, reporteID, notaVoz, rutaID, mensaje string
+		var lat, lon float64
+		var fecha time.Time
 
-        notificacion := map[string]interface{}{
-            "id":          n.ID,
-            "tipo_alerta": n.Tipo,
-            "reporte_id":  n.ReporteID,
-            "latitud":     n.Latitud,
-            "longitud":    n.Longitud,
-            "nota_voz":    n.NotaVoz,
-            "ruta_id":     n.RutaID,
-            "mensaje":     n.Mensaje,
-            "fecha_envio": n.FechaEnvio,
-            "leida":       false,
-        }
-        notificaciones = append(notificaciones, notificacion)
-    }
+		rows.Scan(&id, &tipo, &reporteID, &lat, &lon, &notaVoz, &rutaID, &mensaje, &fecha)
+		notificaciones = append(notificaciones, map[string]interface{}{
+			"id": id, "tipo_alerta": tipo, "reporte_id": reporteID,
+			"latitud": lat, "longitud": lon, "nota_voz": notaVoz,
+			"ruta_id": rutaID, "mensaje": mensaje, "fecha_envio": fecha, "leida": false,
+		})
+	}
 
-    if len(notificaciones) > 0 {
-        response := map[string]interface{}{
-            "tipo":            "historial_inicial",
-            "notificaciones":  notificaciones,
-            "total_no_leidas": len(notificaciones),
-        }
-        if err := conn.WriteJSON(response); err != nil {
-            log.Printf("❌ [HISTORIAL] Error enviando historial: %v", err)
-        } else {
-            log.Printf("✅ [HISTORIAL] Historial enviado a usuario %s", userID)
-        }
-    }
+	if len(notificaciones) > 0 {
+		conn.WriteJSON(map[string]interface{}{
+			"tipo":            MsgHistorialInicial,
+			"notificaciones":  notificaciones,
+			"total_no_leidas": len(notificaciones),
+		})
+	}
 }
 
-// GetEstadoSuscriptores - Función de debug
 func GetEstadoSuscriptores() map[string]interface{} {
-    subMu.RLock()
-    defer subMu.RUnlock()
-    
-    estado := make(map[string]interface{})
-    estado["total_rutas"] = len(suscriptores)
-    
-    rutas := make(map[string]int)
-    for rutaID, conns := range suscriptores {
-        rutas[rutaID] = len(conns)
-    }
-    estado["rutas"] = rutas
-    
-    estado["total_usuarios"] = len(suscriptoresPorUsuario)
-    return estado
+	subMu.RLock()
+	defer subMu.RUnlock()
+
+	estado := make(map[string]interface{})
+	estado["total_rutas"] = len(suscriptores)
+	estado["total_usuarios"] = len(suscriptoresPorUsuario)
+
+	rutas := make(map[string]int)
+	for rutaID, conns := range suscriptores {
+		rutas[rutaID] = len(conns)
+	}
+	estado["rutas"] = rutas
+	return estado
 }

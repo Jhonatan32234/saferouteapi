@@ -10,77 +10,112 @@ import (
 
 	"saferoute/config"
 	"saferoute/database"
+	"saferoute/entities"
 	"saferoute/handlers"
 	"saferoute/middleware"
+	"saferoute/repository"
+	"saferoute/services"
 )
 
 func main() {
-	// Cargar configuración
+	// ==========================================
+	// 1. Cargar configuración
+	// ==========================================
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatal("Error cargando configuración:", err)
 	}
 
-	// Conectar a PostgreSQL
+	// ==========================================
+	// 2. Decodificar clave de cifrado AES-256
+	// ==========================================
+	encryptionKey, err := entities.DecodeEncryptionKey(cfg.EncryptionKey)
+	if err != nil {
+		log.Fatalf("❌ Error con ENCRYPTION_KEY: %v. Asegúrate de que sea base64 de 32 bytes.", err)
+	}
+	log.Println("🔑 Clave de cifrado AES-256 cargada correctamente")
+
+	// ==========================================
+	// 3. Conectar a PostgreSQL
+	// ==========================================
 	if err := database.Connect(cfg.DatabaseURL); err != nil {
 		log.Fatal("Error conectando a base de datos:", err)
 	}
 	defer database.Close()
 
-	// Configurar rate limiter
+	// ==========================================
+	// 4. Inicializar Repositorios (Capa de Datos)
+	// ==========================================
+	usuarioRepo := repository.NewUsuarioRepository(database.DB, encryptionKey)
+	reporteRepo := repository.NewReporteRepository(database.DB)
+
+	// ==========================================
+	// 5. Inicializar Servicios (Lógica de Negocio)
+	// ==========================================
+	authSvc := services.NewAuthService(usuarioRepo, encryptionKey)
+	reporteSvc := services.NewReporteService(reporteRepo)
+	userSvc := services.NewUserService(usuarioRepo, encryptionKey)
+
+	// ==========================================
+	// 6. Configurar Rate Limiter
+	// ==========================================
 	limiter := middleware.NewIPRateLimiter(5, 10)
 
-	// Router
+	// ==========================================
+	// 7. Configurar Router
+	// ==========================================
 	r := mux.NewRouter()
 
-	// ==========================================
-	// WebSocket - ANTES de los middlewares
-	// ==========================================
+	// WebSocket - ANTES de los middlewares HTTP (no usa JWT en header, sino query param)
 	handlers.SetJWTSecret(cfg.JWTSecret)
 	r.HandleFunc("/ws/alertas/{ruta_id}", handlers.WebSocketHandler())
 
 	// ==========================================
-	// Middlewares globales
+	// 8. Middlewares globales (Interceptor Chain)
 	// ==========================================
 	httpRouter := r.PathPrefix("/").Subrouter()
 	httpRouter.Use(middleware.SecurityHeaders)
-	httpRouter.Use(middleware.LoggingMiddleware)
+	httpRouter.Use(middleware.LoggingMiddleware) // Interceptor de Auditoría/Respuesta
 	httpRouter.Use(middleware.RateLimitMiddleware(limiter))
 
 	// ==========================================
-	// ENDPOINTS INTERNOS (API Key)
+	// 9. ENDPOINTS INTERNOS (API Key)
 	// ==========================================
 	interno := httpRouter.PathPrefix("/api/internal").Subrouter()
 	interno.Use(middleware.InternalAPIKeyMiddleware)
 
-	interno.HandleFunc("/reportes", handlers.GetReportesHandler()).Methods("GET")
-	interno.HandleFunc("/reportes/cercanos", handlers.GetReportesCercanosHandler()).Methods("GET")
+	interno.HandleFunc("/reportes", handlers.GetReportesHandler(reporteSvc)).Methods("GET")
+	interno.HandleFunc("/reportes/cercanos", handlers.GetReportesCercanosHandler(reporteSvc)).Methods("GET")
 	interno.HandleFunc("/reportes/estadisticas", handlers.GetEstadisticasHandler()).Methods("GET")
-	interno.HandleFunc("/reportes/{id}", handlers.GetReporteHandler()).Methods("GET")
+	interno.HandleFunc("/reportes/{id}", handlers.GetReporteHandler(reporteSvc)).Methods("GET")
 	interno.HandleFunc("/usuarios", handlers.GetUsuariosInternoHandler()).Methods("GET")
 
-	// Documentación
+	// Documentación Swagger UI
 	httpRouter.PathPrefix("/docs/").Handler(http.StripPrefix("/docs/", http.FileServer(http.Dir("static"))))
 	httpRouter.HandleFunc("/api/docs", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "docs/api.md")
 	})
 
 	// ==========================================
-	// ENDPOINTS PÚBLICOS (sin autenticación)
+	// 10. ENDPOINTS PÚBLICOS (sin autenticación)
 	// ==========================================
-	httpRouter.HandleFunc("/api/auth/login", handlers.LoginHandler(cfg.JWTSecret)).Methods("POST")
-	httpRouter.HandleFunc("/api/auth/register", handlers.RegisterHandler()).Methods("POST")
+	// Pipe + Service inyectados en los handlers
+	httpRouter.HandleFunc("/api/auth/login", handlers.LoginHandler(authSvc, cfg.JWTSecret)).Methods("POST")
+	httpRouter.HandleFunc("/api/auth/register", handlers.RegisterHandler(authSvc)).Methods("POST")
 	httpRouter.HandleFunc("/api/health", handlers.HealthHandler()).Methods("GET")
 
+	// --- Clusters (proxy al motor de rutas, público) ---
+	httpRouter.HandleFunc("/api/clusters", handlers.ProxyHandler(cfg.MotorRutasURL+"/clusters")).Methods("GET")
+
 	// ==========================================
-	// ENDPOINTS PROTEGIDOS (JWT requerido)
+	// 11. ENDPOINTS PROTEGIDOS (JWT requerido)
 	// ==========================================
 	api := httpRouter.PathPrefix("/api").Subrouter()
 	api.Use(middleware.AuthMiddleware(cfg.JWTSecret))
 
-	// --- Perfil de usuario (cualquier rol) ---
-	api.HandleFunc("/user/profile", handlers.GetUserProfileHandler()).Methods("GET")
-	api.HandleFunc("/user/profile", handlers.UpdateUserProfileHandler()).Methods("PUT")
+	// --- Perfil de usuario ---
+	api.HandleFunc("/user/profile", handlers.GetUserProfileHandler(userSvc)).Methods("GET")
+	api.HandleFunc("/user/profile", handlers.UpdateUserProfileHandler(userSvc)).Methods("PUT")
 
 	// --- Historial de notificaciones ---
 	api.HandleFunc("/user/notificaciones", handlers.GetHistorialNotificacionesHandler()).Methods("GET")
@@ -98,33 +133,32 @@ func main() {
 	api.HandleFunc("/user/zonas", handlers.ObtenerZonasUsuarioHandler()).Methods("GET")
 
 	// --- Reportes (cualquier rol autenticado) ---
-	api.HandleFunc("/reportes", handlers.CreateReporteHandler()).Methods("POST")
-	api.HandleFunc("/reportes", handlers.GetReportesHandler()).Methods("GET")
-	api.HandleFunc("/reportes/cercanos", handlers.GetReportesCercanosHandler()).Methods("GET")
+	api.HandleFunc("/reportes", handlers.CreateReporteHandler(reporteSvc)).Methods("POST")
+	api.HandleFunc("/reportes", handlers.GetReportesHandler(reporteSvc)).Methods("GET")
+	api.HandleFunc("/reportes/cercanos", handlers.GetReportesCercanosHandler(reporteSvc)).Methods("GET")
 	api.HandleFunc("/reportes/estadisticas", handlers.GetEstadisticasHandler()).Methods("GET")
-	api.HandleFunc("/reportes/{id}", handlers.GetReporteHandler()).Methods("GET")
-	api.HandleFunc("/reportes/{id}/validar", handlers.ValidarReporteHandler()).Methods("PUT")
+	api.HandleFunc("/reportes/{id}", handlers.GetReporteHandler(reporteSvc)).Methods("GET")
+	api.HandleFunc("/reportes/{id}/validar", handlers.ValidarReporteHandler(reporteSvc)).Methods("PUT")
 
-	// --- Rutas (cualquier rol) ---
+	// --- Rutas ---
 	api.HandleFunc("/rutas", handlers.GetRutasHandler(cfg.MotorRutasURL)).Methods("POST")
 
-	// --- Predicciones (admin y conductor) ---
+	// --- Predicciones ---
 	api.HandleFunc("/predicciones/zonas", handlers.ProxyHandler(cfg.MotorPrediccionesURL+"/predicciones/zonas")).Methods("POST")
 	api.HandleFunc("/predicciones/perfil", handlers.ProxyHandler(cfg.MotorPrediccionesURL+"/predicciones/perfil")).Methods("POST")
 
 	// ==========================================
-	// ENDPOINTS SOLO ADMIN (RBAC)
+	// 12. ENDPOINTS SOLO ADMIN (RBAC)
 	// ==========================================
 	apiAdmin := api.PathPrefix("/admin").Subrouter()
 	apiAdmin.Use(middleware.RoleMiddleware(cfg.JWTSecret, "admin"))
 
 	apiAdmin.HandleFunc("/resumen", handlers.GetAdminResumenHandler(cfg.MotorNLPURL, cfg.MotorLLMURL)).Methods("GET")
 	apiAdmin.HandleFunc("/buscar", handlers.BuscarReportesHandler(cfg.MotorNLPURL)).Methods("POST")
-	// Admin endpoints (solo admin)
-	apiAdmin.HandleFunc("/registrar-conductor", handlers.RegistrarConductorHandler()).Methods("POST")
+	apiAdmin.HandleFunc("/registrar-conductor", handlers.RegistrarConductorHandler(authSvc)).Methods("POST")
 
 	// ==========================================
-	// DEBUG
+	// 13. DEBUG
 	// ==========================================
 	r.HandleFunc("/api/debug/websocket", func(w http.ResponseWriter, r *http.Request) {
 		estado := handlers.GetEstadoSuscriptores()
@@ -133,7 +167,7 @@ func main() {
 	}).Methods("GET")
 
 	// ==========================================
-	// CORS RESTRICTIVO
+	// 14. CORS RESTRICTIVO
 	// ==========================================
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{
@@ -143,7 +177,7 @@ func main() {
 			"http://127.0.0.1:3000",
 			"http://localhost:5173",
 			"https://saferoute-api-m4i5.onrender.com",
-			"null", // Para archivos HTML locales (dashboard)
+			"null",
 		},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Internal-API-Key", "X-Requested-With"},
@@ -154,8 +188,9 @@ func main() {
 	handler := c.Handler(r)
 
 	log.Printf("🚛 SafeRoute API Gateway v1.0.0")
-	log.Printf("🔒 Seguridad: JWT + RBAC + CORS restrictivo + Rate Limiting")
+	log.Printf("🏗️  Arquitectura: Repository → Service → Pipe → Handler")
+	log.Printf("🔒 Seguridad: JWT + RBAC + AES-256 + CORS + Rate Limiting")
 	log.Printf("📡 Iniciando en puerto %s", cfg.Port)
-	log.Printf("📚 Documentación: http://localhost:%s/docs/", cfg.Port)
+	log.Printf("📚 Documentación: http://localhost:%s/docs/docs.html", cfg.Port)
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, handler))
 }

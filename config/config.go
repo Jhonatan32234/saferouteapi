@@ -17,8 +17,9 @@ type Config struct {
     MotorLLMURL   string
     Environment   string
     RateLimit     RateLimitConfig
-    InternalAPIKey string  // NUEVO
-    MotorPrediccionesURL  string  // NUEVO
+    InternalAPIKey string
+    MotorPrediccionesURL  string
+    EncryptionKey string // Clave AES-256 para cifrado de campos sensibles (base64, 32 bytes)
 
 }
 
@@ -93,6 +94,13 @@ func Load() (*Config, error) {
         burst = 20
     }
 
+    encryptionKey := os.Getenv("ENCRYPTION_KEY")
+    if encryptionKey == "" {
+        // Clave de desarrollo por defecto (32 bytes en base64). ¡Cambiar en producción!
+        encryptionKey = "ZGV2ZWxvcG1lbnRLZXkxMjM0NTY3ODkwMTIzNA=="
+        log.Println("⚠️ ENCRYPTION_KEY no configurado, usando clave de desarrollo. ¡No usar en producción!")
+    }
+
     return &Config{
         Port:          port,
         DatabaseURL:   databaseURL,
@@ -105,6 +113,8 @@ func Load() (*Config, error) {
             RequestsPerSecond: requestsPerSecond,
             Burst:             burst,
         },
-        InternalAPIKey: internal_api_key,
+        InternalAPIKey:      internal_api_key,
+        MotorPrediccionesURL: motor_predicciones_url,
+        EncryptionKey:       encryptionKey,
     }, nil
 }

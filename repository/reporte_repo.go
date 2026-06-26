@@ -1,0 +1,170 @@
+package repository
+
+import (
+	"database/sql"
+	"fmt"
+
+	"saferoute/entities"
+)
+
+// ReporteRepository define las operaciones de acceso a datos para la tabla `reportes`.
+// Todas las consultas usan EXCLUSIVAMENTE placeholders parametrizados ($1, $2...).
+type ReporteRepository struct {
+	db *sql.DB
+}
+
+// NewReporteRepository crea una nueva instancia del repositorio.
+func NewReporteRepository(db *sql.DB) *ReporteRepository {
+	return &ReporteRepository{db: db}
+}
+
+// Create inserta un nuevo reporte y devuelve la entidad con todos los campos
+// rellenados por PostgreSQL (id, timestamp, vigente, confirmaciones).
+func (r *ReporteRepository) Create(e *entities.ReporteEntity) (*entities.ReporteEntity, error) {
+	result := &entities.ReporteEntity{}
+	err := r.db.QueryRow(
+		`INSERT INTO reportes (user_id, tipo, latitud, longitud, nota_voz, ruta_id)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 RETURNING id, user_id, tipo, latitud, longitud, COALESCE(nota_voz,''),
+		           ruta_id, timestamp, vigente, confirmaciones`,
+		e.UserID, e.Tipo, e.Latitud, e.Longitud, e.NotaVoz, e.RutaID,
+	).Scan(
+		&result.ID, &result.UserID, &result.Tipo, &result.Latitud, &result.Longitud,
+		&result.NotaVoz, &result.RutaID, &result.Timestamp, &result.Vigente, &result.Confirmaciones,
+	)
+	return result, err
+}
+
+// FindAll obtiene reportes con filtros opcionales. Usa solo placeholders parametrizados.
+func (r *ReporteRepository) FindAll(tipo string, vigente *bool, limit int) ([]entities.ReporteEntity, error) {
+	query := `SELECT id, COALESCE(user_id::text,''), tipo, latitud, longitud,
+	                 COALESCE(nota_voz,''), ruta_id, timestamp, vigente, confirmaciones
+	          FROM reportes WHERE 1=1`
+	args := []interface{}{}
+	argCount := 0
+
+	if tipo != "" {
+		argCount++
+		query += fmt.Sprintf(" AND tipo = $%d", argCount)
+		args = append(args, tipo)
+	}
+	if vigente != nil {
+		argCount++
+		query += fmt.Sprintf(" AND vigente = $%d", argCount)
+		args = append(args, *vigente)
+	}
+
+	argCount++
+	query += fmt.Sprintf(" ORDER BY timestamp DESC LIMIT $%d", argCount)
+	args = append(args, limit)
+
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var reportes []entities.ReporteEntity
+	for rows.Next() {
+		var e entities.ReporteEntity
+		if err := rows.Scan(
+			&e.ID, &e.UserID, &e.Tipo, &e.Latitud, &e.Longitud,
+			&e.NotaVoz, &e.RutaID, &e.Timestamp, &e.Vigente, &e.Confirmaciones,
+		); err != nil {
+			continue
+		}
+		reportes = append(reportes, e)
+	}
+	return reportes, nil
+}
+
+// FindByID busca un reporte por su UUID.
+func (r *ReporteRepository) FindByID(id string) (*entities.ReporteEntity, error) {
+	e := &entities.ReporteEntity{}
+	err := r.db.QueryRow(
+		`SELECT id, COALESCE(user_id::text,''), tipo, latitud, longitud,
+		        COALESCE(nota_voz,''), ruta_id, timestamp, vigente, confirmaciones
+		 FROM reportes WHERE id = $1`,
+		id,
+	).Scan(
+		&e.ID, &e.UserID, &e.Tipo, &e.Latitud, &e.Longitud,
+		&e.NotaVoz, &e.RutaID, &e.Timestamp, &e.Vigente, &e.Confirmaciones,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return e, nil
+}
+
+// FindCercanos busca reportes vigentes dentro de un radio en kilómetros usando la fórmula de Haversine.
+func (r *ReporteRepository) FindCercanos(lat, lon, radioKm float64, limit int) ([]entities.ReporteEntity, error) {
+	// Fórmula de Haversine en SQL para calcular distancia geográfica
+	rows, err := r.db.Query(
+		`SELECT id, COALESCE(user_id::text,''), tipo, latitud, longitud,
+		        COALESCE(nota_voz,''), ruta_id, timestamp, vigente, confirmaciones,
+		        (6371 * acos(
+		            cos(radians($1)) * cos(radians(latitud)) *
+		            cos(radians(longitud) - radians($2)) +
+		            sin(radians($1)) * sin(radians(latitud))
+		        )) AS distancia_km
+		 FROM reportes
+		 WHERE vigente = true
+		   AND (6371 * acos(
+		            cos(radians($1)) * cos(radians(latitud)) *
+		            cos(radians(longitud) - radians($2)) +
+		            sin(radians($1)) * sin(radians(latitud))
+		        )) <= $3
+		 ORDER BY distancia_km ASC
+		 LIMIT $4`,
+		lat, lon, radioKm, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var reportes []entities.ReporteEntity
+	for rows.Next() {
+		var e entities.ReporteEntity
+		var distancia float64
+		if err := rows.Scan(
+			&e.ID, &e.UserID, &e.Tipo, &e.Latitud, &e.Longitud,
+			&e.NotaVoz, &e.RutaID, &e.Timestamp, &e.Vigente, &e.Confirmaciones,
+			&distancia,
+		); err != nil {
+			continue
+		}
+		reportes = append(reportes, e)
+	}
+	return reportes, nil
+}
+
+// Validar actualiza el estado vigente de un reporte e incrementa las confirmaciones si es necesario.
+func (r *ReporteRepository) Validar(id string, vigente bool) error {
+	var err error
+	if vigente {
+		_, err = r.db.Exec(
+			`UPDATE reportes SET confirmaciones = confirmaciones + 1 WHERE id = $1`,
+			id,
+		)
+	} else {
+		_, err = r.db.Exec(
+			`UPDATE reportes SET vigente = false WHERE id = $1`,
+			id,
+		)
+	}
+	return err
+}
+
+// SuscribirRuta suscribe a un usuario a una ruta al crear un reporte.
+// Usa ON CONFLICT para ser idempotente (no falla si ya existe la suscripción).
+func (r *ReporteRepository) SuscribirRuta(userID, rutaID string) error {
+	_, err := r.db.Exec(
+		`INSERT INTO suscripciones_rutas (user_id, ruta_id, suscrito, fecha_suscripcion, fecha_actualizacion)
+		 VALUES ($1, $2, true, NOW(), NOW())
+		 ON CONFLICT (user_id, ruta_id)
+		 DO UPDATE SET suscrito = true, fecha_actualizacion = NOW()`,
+		userID, rutaID,
+	)
+	return err
+}

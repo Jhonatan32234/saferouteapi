@@ -6,14 +6,12 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"saferoute/database"
-
-	"golang.org/x/crypto/bcrypt"
+	"saferoute/services"
 )
 
 // En handlers/admin.go
 
-func RegistrarConductorHandler() http.HandlerFunc {
+func RegistrarConductorHandler(authSvc *services.AuthService) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var req struct {
             Email    string `json:"email"`
@@ -32,24 +30,10 @@ func RegistrarConductorHandler() http.HandlerFunc {
             return
         }
         
-        // Hash de contraseña
-        hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+        // Registrar conductor delegando a la capa de servicio
+        id, err := authSvc.RegisterConductor(req.Email, req.Password, req.Nombre, req.Telefono)
         if err != nil {
-            writeError(w, http.StatusInternalServerError, "error procesando contraseña")
-            return
-        }
-        
-        // Insertar como conductor
-        var id string
-        err = database.DB.QueryRow(
-            `INSERT INTO usuarios (email, password_hash, nombre, tipo, telefono) 
-             VALUES ($1, $2, $3, 'conductor', $4) 
-             RETURNING id`,
-            req.Email, string(hashedPassword), req.Nombre, req.Telefono,
-        ).Scan(&id)
-        
-        if err != nil {
-            writeError(w, http.StatusConflict, "el email ya está registrado")
+            writeError(w, http.StatusConflict, err.Error())
             return
         }
         

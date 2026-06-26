@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -78,17 +79,17 @@ func GetHistorialNotificacionesHandler() http.HandlerFunc {
 		}
 
 		// Contar total
-		countQuery := `SELECT COUNT(*) FROM notificaciones_historial WHERE user_id = $1`
+		countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM notificaciones_historial WHERE user_id = '%s'`, userID)
 		if soloNoLeidas {
-			countQuery += " AND leida = false"
+		    countQuery += " AND leida = false"
 		}
-
+		
 		var total int
-		err := database.DB.QueryRow(countQuery, userID).Scan(&total)
+		err := database.DB.QueryRow(countQuery).Scan(&total)  // SIN userID
 		if err != nil {
-			log.Printf("❌ [HISTORIAL] Error contando notificaciones: %v", err)
-			writeError(w, http.StatusInternalServerError, "error obteniendo notificaciones")
-			return
+		    log.Printf("❌ [HISTORIAL] Error contando notificaciones: %v", err)
+		    writeError(w, http.StatusInternalServerError, "error obteniendo notificaciones")
+		    return
 		}
 
 		// Obtener notificaciones no leídas

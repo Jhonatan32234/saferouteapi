@@ -23,7 +23,7 @@ var tiposPermitidosPipe = map[string]bool{
 // Aplica transformaciones en lugar de solo rechazar: rellena campos opcionales
 // con valores por defecto seguros para reducir errores del cliente.
 func ValidateReporte(req *models.ReporteRequest) error {
-	// Normalizar tipo a minúsculas
+	// Normalizar tipo a minúsculasa
 	req.Tipo = strings.ToLower(strings.TrimSpace(req.Tipo))
 
 	if req.Tipo == "" {

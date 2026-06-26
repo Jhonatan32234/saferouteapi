@@ -247,15 +247,19 @@ func notificarRutasCercanas(reporte models.ReporteResponse) {
 	}
 
 	// Consulta segura con placeholders parametrizados (sin fmt.Sprintf)
+	// Consulta corregida y ordenada de forma secuencial
 	rows, err := database.DB.Query(
-		`SELECT DISTINCT ruta_id FROM reportes
-		 WHERE vigente = TRUE
-		   AND ruta_id != $1
-		   AND (6371 * acos(cos(radians($2)) * cos(radians(latitud)) *
-		        cos(radians(longitud) - radians($3)) +
-		        sin(radians($2)) * sin(radians(latitud)))) <= 15
-		 LIMIT 10`,
-		reporte.RutaID, reporte.Latitud, reporte.Longitud,
+	    `SELECT DISTINCT ruta_id FROM reportes
+	     WHERE vigente = TRUE
+	       AND ruta_id != $1
+	       AND (6371 * acos(cos(radians($2)) * cos(radians(latitud)) *
+	            cos(radians(longitud) - radians($4)) +
+	            sin(radians($3)) * sin(radians(latitud)))) <= 15
+	     LIMIT 10`,
+	    reporte.RutaID, 
+	    reporte.Latitud,  // Asignado a $2
+	    reporte.Latitud,  // Asignado a $3
+	    reporte.Longitud, // Asignado a $4
 	)
 	if err != nil {
 		log.Printf("❌ [RUTAS CERCANAS] Error SQL: %v", err)

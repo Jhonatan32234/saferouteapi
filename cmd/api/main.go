@@ -102,7 +102,8 @@ func main() {
 	// Pipe + Service inyectados en los handlers
 	httpRouter.HandleFunc("/api/auth/login", handlers.LoginHandler(authSvc, cfg.JWTSecret)).Methods("POST")
 	httpRouter.HandleFunc("/api/auth/register", handlers.RegisterHandler(authSvc)).Methods("POST")
-	httpRouter.HandleFunc("/api/health", handlers.HealthHandler()).Methods("GET")
+	httpRouter.HandleFunc("/api/health", handlers.HealthHandler()).Methods("GET", "HEAD")
+
 
 	// --- Clusters (proxy al motor de rutas, público) ---
 	httpRouter.HandleFunc("/api/clusters", handlers.ProxyHandler(cfg.MotorRutasURL+"/clusters")).Methods("GET")

@@ -35,8 +35,7 @@ func (r *ReporteRepository) Create(e *entities.ReporteEntity) (*entities.Reporte
 	return result, err
 }
 
-// FindAll obtiene reportes con filtros opcionales. Usa solo placeholders parametrizados.
-func (r *ReporteRepository) FindAll(tipo string, vigente *bool, limit int) ([]entities.ReporteEntity, error) {
+func (r *ReporteRepository) FindAll(tipo string, vigente *bool, limit int, offset int) ([]entities.ReporteEntity, error) {
 	query := `SELECT id, COALESCE(user_id::text,''), tipo, latitud, longitud,
 	                 COALESCE(nota_voz,''), ruta_id, timestamp, vigente, confirmaciones
 	          FROM reportes WHERE 1=1`
@@ -54,9 +53,35 @@ func (r *ReporteRepository) FindAll(tipo string, vigente *bool, limit int) ([]en
 		args = append(args, *vigente)
 	}
 
+	// Contar total para validar offset
+	var total int
+	countQuery := "SELECT COUNT(*) FROM reportes WHERE 1=1"
+	countArgs := []interface{}{}
+	cArg := 0
+	if tipo != "" {
+		cArg++
+		countQuery += fmt.Sprintf(" AND tipo = $%d", cArg)
+		countArgs = append(countArgs, tipo)
+	}
+	if vigente != nil {
+		cArg++
+		countQuery += fmt.Sprintf(" AND vigente = $%d", cArg)
+		countArgs = append(countArgs, *vigente)
+	}
+	r.db.QueryRow(countQuery, countArgs...).Scan(&total)
+
+	// Si offset > total, devolver vacío sin error
+	if offset >= total {
+		return []entities.ReporteEntity{}, nil
+	}
+
 	argCount++
 	query += fmt.Sprintf(" ORDER BY timestamp DESC LIMIT $%d", argCount)
 	args = append(args, limit)
+
+	argCount++
+	query += fmt.Sprintf(" OFFSET $%d", argCount)
+	args = append(args, offset)
 
 	rows, err := r.db.Query(query, args...)
 	if err != nil {

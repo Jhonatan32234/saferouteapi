@@ -50,7 +50,7 @@ func (s *ReporteService) Create(req models.ReporteRequest, userID string) (model
 }
 
 // GetAll obtiene la lista de reportes con filtros opcionales y devuelve DTOs limpios.
-func (s *ReporteService) GetAll(tipo string, vigenteStr string, limit int) ([]models.ReporteResponse, error) {
+func (s *ReporteService) GetAll(tipo string, vigenteStr string, limit int, offset int) ([]models.ReporteResponse, error) {
 	var vigenteFilter *bool
 	if vigenteStr == "true" {
 		v := true
@@ -60,7 +60,7 @@ func (s *ReporteService) GetAll(tipo string, vigenteStr string, limit int) ([]mo
 		vigenteFilter = &v
 	}
 
-	entities, err := s.reporteRepo.FindAll(tipo, vigenteFilter, limit)
+	entities, err := s.reporteRepo.FindAll(tipo, vigenteFilter, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("error consultando reportes: %w", err)
 	}

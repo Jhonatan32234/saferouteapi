@@ -81,7 +81,12 @@ func GetReportesHandler(reporteSvc *services.ReporteService) http.HandlerFunc {
 			limit = l
 		}
 
-		reportes, err := reporteSvc.GetAll(tipo, vigente, limit)
+		offset := 0
+        if o, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && o >= 0 {
+            offset = o
+        }
+
+		reportes, err := reporteSvc.GetAll(tipo, vigente, limit, offset)
 		if err != nil {
 			log.Printf("❌ [REPORTES] Error consultando: %v", err)
 			writeError(w, http.StatusInternalServerError, "error consultando reportes")

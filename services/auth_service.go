@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -13,81 +14,122 @@ import (
 )
 
 // AuthService contiene la lógica de negocio de autenticación.
-// No tiene acceso directo a SQL; delega toda la persistencia al repositorio.
 type AuthService struct {
 	usuarioRepo   *repository.UsuarioRepository
 	encryptionKey []byte
+	jwtSecret     string
 }
 
 // NewAuthService crea una nueva instancia del servicio de autenticación.
-func NewAuthService(repo *repository.UsuarioRepository, encryptionKey []byte) *AuthService {
+func NewAuthService(repo *repository.UsuarioRepository, encryptionKey []byte, jwtSecret string) *AuthService {
 	return &AuthService{
 		usuarioRepo:   repo,
 		encryptionKey: encryptionKey,
+		jwtSecret:     jwtSecret,
 	}
 }
 
-// Login autentica al usuario y devuelve un token JWT válido por 24 horas.
-// El repositorio se encarga de recuperar y descifrar el teléfono; el servicio
-// solo trabaja con la entidad limpia.
-func (s *AuthService) Login(req models.LoginRequest, jwtSecret string) (models.AuthResponse, error) {
-	// El repositorio recupera el usuario con AfterLoad aplicado
-	usuario, err := s.usuarioRepo.FindByEmail(req.Email)
+func (s *AuthService) Login(req models.LoginRequest) (models.AuthResponse, error) {
+    usuario, err := s.usuarioRepo.FindByEmail(req.Email)
+    if err != nil {
+        return models.AuthResponse{}, fmt.Errorf("credenciales inválidas")
+    }
+
+    if err := bcrypt.CompareHashAndPassword([]byte(usuario.PasswordHash), []byte(req.Password)); err != nil {
+        return models.AuthResponse{}, fmt.Errorf("credenciales inválidas")
+    }
+
+    token, err := generateJWT(usuario.ID, usuario.Email, usuario.Tipo, s.jwtSecret)
+    if err != nil {
+        return models.AuthResponse{}, fmt.Errorf("error generando token")
+    }
+
+    return models.AuthResponse{
+        Token:  token,
+        Nombre: usuario.Nombre,
+        Tipo:   usuario.Tipo,
+        Email:  usuario.Email,
+        UserID: usuario.ID,
+    }, nil
+}
+
+
+func (s *AuthService) Register(req models.RegisterRequest) (models.AuthResponse, error) {
+	// Validaciones básicas
+	if req.Email == "" || req.Password == "" || req.Nombre == "" {
+		return models.AuthResponse{}, fmt.Errorf("email, password y nombre son requeridos")
+	}
+
+	// Verificar si el email ya existe
+	existente, _ := s.usuarioRepo.FindByEmail(req.Email)
+	if existente != nil {
+		return models.AuthResponse{}, fmt.Errorf("el email ya está registrado")
+	}
+
+	// Hashear contraseña
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return models.AuthResponse{}, fmt.Errorf("credenciales inválidas")
+		return models.AuthResponse{}, fmt.Errorf("error procesando contraseña")
 	}
 
-	// Verificar contraseña con bcrypt
-	if err := bcrypt.CompareHashAndPassword([]byte(usuario.PasswordHash), []byte(req.Password)); err != nil {
-		return models.AuthResponse{}, fmt.Errorf("credenciales inválidas")
+	// Asignar tipo por defecto si no se especifica
+	tipo := req.Tipo
+	if tipo == "" {
+		tipo = "conductor"
 	}
 
-	// Generar JWT con claims de seguridad
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": usuario.ID,
-		"nombre":  usuario.Nombre,
-		"tipo":    usuario.Tipo,
-		"exp":     time.Now().Add(24 * time.Hour).Unix(),
-		"iat":     time.Now().Unix(),
-	})
+	log.Printf("📝 [AUTH] Registrando usuario - Email: %s, Teléfono: '%s'", req.Email, req.Telefono)
 
-	tokenString, err := token.SignedString([]byte(jwtSecret))
+	// Crear entidad
+	entity := &entities.UsuarioEntity{
+		Email:        req.Email,
+		PasswordHash: string(hashedPassword),
+		Nombre:       req.Nombre,
+		Tipo:         tipo,
+		Telefono:     req.Telefono,
+	}
+
+	// Guardar en BD
+	userID, err := s.usuarioRepo.Create(entity)
+	if err != nil {
+		log.Printf("❌ [AUTH] Error creando usuario: %v", err)
+		return models.AuthResponse{}, fmt.Errorf("error al crear usuario")
+	}
+
+	log.Printf("✅ [AUTH] Usuario creado - ID: %s", userID)
+
+	// Generar token JWT
+	token, err := generateJWT(userID, req.Email, tipo, s.jwtSecret)
 	if err != nil {
 		return models.AuthResponse{}, fmt.Errorf("error generando token")
 	}
 
 	return models.AuthResponse{
-		Token:     tokenString,
-		ExpiresIn: 86400,
-		UserID:    usuario.ID,
-		Nombre:    usuario.Nombre,
-		Tipo:      usuario.Tipo,
+		Token:  token,
+		Nombre: req.Nombre,
+		Tipo:   tipo,
+		Email:  req.Email,
+		UserID: userID,
 	}, nil
 }
 
-// Register crea una cuenta nueva con contraseña hasheada y teléfono cifrado.
-// Devuelve el UUID del usuario creado.
-func (s *AuthService) Register(req models.RegisterRequest) (string, error) {
-	// Hash de contraseña con bcrypt (nunca texto plano en BD)
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return "", fmt.Errorf("error procesando contraseña")
+// generateJWT crea un token JWT firmado
+func generateJWT(userID, email, tipo, jwtSecret string) (string, error) {
+	claims := jwt.MapClaims{
+		"user_id": userID,
+		"email":   email,
+		"tipo":    tipo,
+		"exp":     time.Now().Add(72 * time.Hour).Unix(), // 3 días
+		"iat":     time.Now().Unix(),
 	}
 
-	// Construir entidad limpia. BeforeSave se aplicará en el repositorio.
-	u := &entities.UsuarioEntity{
-		Email:        req.Email,
-		PasswordHash: string(hashedPassword),
-		Nombre:       req.Nombre,
-		Tipo:         req.Tipo,
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(jwtSecret))
+	if err != nil {
+		return "", fmt.Errorf("error firmando token: %w", err)
 	}
 
-	// El repositorio aplica BeforeSave → cifra Telefono (vacío en registro público)
-	id, err := s.usuarioRepo.Create(u)
-	if err != nil {
-		return "", fmt.Errorf("el email ya está registrado")
-	}
-	return id, nil
+	return tokenString, nil
 }
 
 // RegisterConductor crea un conductor con teléfono, invocado solo por admins.

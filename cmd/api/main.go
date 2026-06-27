@@ -52,7 +52,7 @@ func main() {
 	// ==========================================
 	// 5. Inicializar Servicios (Lógica de Negocio)
 	// ==========================================
-	authSvc := services.NewAuthService(usuarioRepo, encryptionKey)
+	authSvc := services.NewAuthService(usuarioRepo, encryptionKey, cfg.JWTSecret)
 	reporteSvc := services.NewReporteService(reporteRepo)
 	userSvc := services.NewUserService(usuarioRepo, encryptionKey)
 

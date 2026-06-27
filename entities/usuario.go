@@ -24,36 +24,29 @@ type UsuarioEntity struct {
 	UltimoAcceso *time.Time
 }
 
-// BeforeSave cifra el campo Telefono usando AES-256-GCM antes de persistir en la BD.
-// Se debe llamar siempre antes de INSERT o UPDATE que involucre el teléfono.
-func (u *UsuarioEntity) BeforeSave(encryptionKey []byte) error {
-	if u.Telefono == "" {
-		return nil
-	}
-	encrypted, err := encryptAES(u.Telefono, encryptionKey)
-	if err != nil {
-		return fmt.Errorf("BeforeSave: error cifrando teléfono: %w", err)
-	}
-	u.Telefono = encrypted
-	return nil
+func (u *UsuarioEntity) BeforeSave(key []byte) error {
+    if u.Telefono == "" {
+        return nil
+    }
+    encrypted, err := encrypt(u.Telefono, key)
+    if err != nil {
+        return err
+    }
+    u.Telefono = encrypted
+    return nil
 }
 
-// AfterLoad descifra el campo Telefono usando AES-256-GCM después de cargarlo desde la BD.
-// Se debe llamar siempre después de leer una fila con telefono desde PostgreSQL.
-func (u *UsuarioEntity) AfterLoad(encryptionKey []byte) error {
-	if u.Telefono == "" {
-		return nil
-	}
-	// Si el valor no puede descifrarse (e.g. datos legacy en texto plano), lo mantenemos tal cual.
-	decrypted, err := decryptAES(u.Telefono, encryptionKey)
-	if err != nil {
-		// Dato legacy (texto plano), no falla, simplemente no descifra.
-		return nil
-	}
-	u.Telefono = decrypted
-	return nil
+func (u *UsuarioEntity) AfterLoad(key []byte) error {
+    if u.Telefono == "" {
+        return nil
+    }
+    decrypted, err := decrypt(u.Telefono, key)
+    if err != nil {
+        return err
+    }
+    u.Telefono = decrypted
+    return nil
 }
-
 // =============================================================
 // Funciones internas de cifrado AES-256-GCM
 // =============================================================

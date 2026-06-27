@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"log"
 
 	"saferoute/entities"
 )
@@ -68,56 +69,77 @@ func (r *UsuarioRepository) FindByID(id string) (*entities.UsuarioEntity, error)
 }
 
 // Create inserta un nuevo usuario. Aplica BeforeSave para cifrar el teléfono.
-// Recibe la entidad con datos en claro y devuelve el ID generado por PostgreSQL.
 func (r *UsuarioRepository) Create(u *entities.UsuarioEntity) (string, error) {
-	// Decorator/Hook: cifrar campo sensible antes de persistir
-	if err := u.BeforeSave(r.encryptionKey); err != nil {
-		return "", fmt.Errorf("BeforeSave error: %w", err)
-	}
+    // LOG para debug
+    log.Printf("💾 [REPO] Creando usuario - Email: %s, Teléfono antes de BeforeSave: '%s'", 
+        u.Email, u.Telefono)
 
-	var id string
-	err := r.db.QueryRow(
-		`INSERT INTO usuarios (email, password_hash, nombre, tipo, telefono)
-		 VALUES ($1, $2, $3, $4, NULLIF($5, ''))
-		 RETURNING id`,
-		u.Email, u.PasswordHash, u.Nombre, u.Tipo, u.Telefono,
-	).Scan(&id)
-	return id, err
+    // Cifrar teléfono antes de guardar
+    if err := u.BeforeSave(r.encryptionKey); err != nil {
+        return "", fmt.Errorf("BeforeSave error: %w", err)
+    }
+
+    log.Printf("💾 [REPO] Teléfono después de BeforeSave: '%s'", u.Telefono)
+
+    var id string
+    err := r.db.QueryRow(
+        `INSERT INTO usuarios (email, password_hash, nombre, tipo, telefono)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id`,
+        u.Email, u.PasswordHash, u.Nombre, u.Tipo, u.Telefono,
+    ).Scan(&id)
+    
+    if err != nil {
+        log.Printf("❌ [REPO] Error INSERT: %v", err)
+        return "", err
+    }
+
+    log.Printf("✅ [REPO] Usuario creado - ID: %s", id)
+    return id, nil
 }
-
-// Update actualiza los campos de perfil de un usuario. Aplica BeforeSave para cifrar el teléfono.
 func (r *UsuarioRepository) Update(u *entities.UsuarioEntity) error {
-	// Decorator/Hook: cifrar campo sensible antes de persistir
-	if err := u.BeforeSave(r.encryptionKey); err != nil {
-		return fmt.Errorf("BeforeSave error: %w", err)
-	}
+    if err := u.BeforeSave(r.encryptionKey); err != nil {
+        return fmt.Errorf("BeforeSave error: %w", err)
+    }
 
-	query := "UPDATE usuarios SET updated_at = NOW()"
-	args := []interface{}{}
-	argCount := 0
+    // Construir query dinámica de forma segura
+    query := "UPDATE usuarios SET updated_at = NOW()"
+    args := []interface{}{}
+    argCount := 0
 
-	if u.Nombre != "" {
-		argCount++
-		query += fmt.Sprintf(", nombre = $%d", argCount)
-		args = append(args, u.Nombre)
-	}
-	if u.Telefono != "" {
-		argCount++
-		query += fmt.Sprintf(", telefono = $%d", argCount)
-		args = append(args, u.Telefono)
-	}
-	if u.Email != "" {
-		argCount++
-		query += fmt.Sprintf(", email = $%d", argCount)
-		args = append(args, u.Email)
-	}
+    if u.Nombre != "" {
+        argCount++
+        query += fmt.Sprintf(", nombre = $%d", argCount)
+        args = append(args, u.Nombre)
+    }
+    
+    // Siempre actualizar teléfono (aunque sea vacío, para poder limpiarlo)
+    argCount++
+    query += fmt.Sprintf(", telefono = NULLIF($%d, '')", argCount)
+    args = append(args, u.Telefono)
+    
+    if u.Email != "" {
+        argCount++
+        query += fmt.Sprintf(", email = $%d", argCount)
+        args = append(args, u.Email)
+    }
 
-	argCount++
-	query += fmt.Sprintf(" WHERE id = $%d", argCount)
-	args = append(args, u.ID)
+    argCount++
+    query += fmt.Sprintf(" WHERE id = $%d", argCount)
+    args = append(args, u.ID)
 
-	_, err := r.db.Exec(query, args...)
-	return err
+    log.Printf("💾 [REPO] Update query: %s", query)
+    log.Printf("💾 [REPO] Update args: %v", args)
+
+    result, err := r.db.Exec(query, args...)
+    if err != nil {
+        return err
+    }
+
+    rows, _ := result.RowsAffected()
+    log.Printf("✅ [REPO] Filas actualizadas: %d", rows)
+    
+    return nil
 }
 
 // UpdateLastAccess actualiza solo el campo ultimo_acceso del usuario.

@@ -10,19 +10,23 @@ type LoginRequest struct {
 }
 
 type RegisterRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	Nombre   string `json:"nombre"`
-	Tipo     string `json:"tipo"` // conductor o admin
+    Email    string `json:"email"`
+    Password string `json:"password"`
+    Nombre   string `json:"nombre"`
+    Tipo     string `json:"tipo"`
+    Telefono string `json:"telefono"` // Asegúrate que este campo exista
 }
 
+// Si no existe, agrégalo al modelo
+
 type AuthResponse struct {
-	Token     string `json:"token"`
-	ExpiresIn int    `json:"expires_in"`
-	UserID    string `json:"user_id"`
-	Nombre    string `json:"nombre"`
-	Tipo      string `json:"tipo"`
+	Token  string `json:"token"`
+	Nombre string `json:"nombre"`
+	Tipo   string `json:"tipo"`
+	Email  string `json:"email,omitempty"` // ← Agregar este campo si no existe
+	UserID string `json:"user_id,omitempty"`
 }
+
 
 // ===== PERFIL DE USUARIO =====
 

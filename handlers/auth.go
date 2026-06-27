@@ -2,74 +2,67 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"saferoute/models"
-	"saferoute/pipes"
 	"saferoute/services"
 )
 
 // LoginHandler es el handler HTTP delegador: decodifica → Pipe → Service → respuesta.
-// Toda la lógica de negocio y acceso a BD vive en AuthService.
 func LoginHandler(authSvc *services.AuthService, jwtSecret string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// 1. Decodificar DTO de entrada
-		var req models.LoginRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "datos de entrada inválidos")
-			return
-		}
+    return func(w http.ResponseWriter, r *http.Request) {
+        var req models.LoginRequest
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+            writeError(w, http.StatusBadRequest, "datos de entrada inválidos")
+            return
+        }
 
-		// 2. Pipe: Validar el DTO
-		if err := pipes.ValidateLogin(req); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
+        // ✅ Solo pasar LoginRequest
+        result, err := authSvc.Login(req)
+        if err != nil {
+            writeError(w, http.StatusUnauthorized, err.Error())
+            return
+        }
 
-		// 3. Service: Ejecutar lógica de negocio
-		response, err := authSvc.Login(req, jwtSecret)
-		if err != nil {
-			writeError(w, http.StatusUnauthorized, err.Error())
-			return
-		}
-
-		// 4. Responder con el DTO de salida
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	}
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(result)
+    }
 }
 
-// RegisterHandler es el handler HTTP delegador para registro de usuarios.
 func RegisterHandler(authSvc *services.AuthService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// 1. Decodificar DTO de entrada
-		var req models.RegisterRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "datos de entrada inválidos")
-			return
-		}
+    return func(w http.ResponseWriter, r *http.Request) {
+        var req models.RegisterRequest
+        
+        // Asegúrate de decodificar correctamente el body
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+            writeError(w, http.StatusBadRequest, "datos de entrada inválidos")
+            return
+        }
 
-		// 2. Pipe: Validar y normalizar el DTO (modifica req in-place)
-		if err := pipes.ValidateRegister(&req); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
+        // LOG para debug
+        log.Printf("📝 [REGISTER] Datos recibidos - Email: %s, Nombre: %s, Teléfono: '%s', Tipo: %s", 
+            req.Email, req.Nombre, req.Telefono, req.Tipo)
 
-		// 3. Service: Ejecutar lógica de negocio
-		id, err := authSvc.Register(req)
-		if err != nil {
-			writeError(w, http.StatusConflict, err.Error())
-			return
-		}
+        // Validar que el teléfono no venga vacío si es requerido
+        if req.Telefono == "" {
+            log.Printf("⚠️ [REGISTER] Teléfono vacío para usuario %s", req.Email)
+        }
 
-		// 4. Responder con el DTO de salida
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]string{
-			"id":     id,
-			"status": "creado",
-		})
-	}
+        result, err := authSvc.Register(req)
+        if err != nil {
+            log.Printf("❌ [REGISTER] Error: %v", err)
+            writeError(w, http.StatusBadRequest, err.Error())
+            return
+        }
+
+        log.Printf("✅ [REGISTER] Usuario creado: %s, Teléfono guardado: '%s'", 
+            result.Email, req.Telefono)
+
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusCreated)
+        json.NewEncoder(w).Encode(result)
+    }
 }
 
 func writeError(w http.ResponseWriter, code int, message string) {

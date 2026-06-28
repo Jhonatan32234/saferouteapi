@@ -15,7 +15,12 @@ import (
 	"saferoute/middleware"
 	"saferoute/repository"
 	"saferoute/services"
+	"embed"
+    "io/fs"
 )
+
+var staticFiles embed.FS
+
 
 func main() {
 	// ==========================================
@@ -91,7 +96,9 @@ func main() {
 	interno.HandleFunc("/usuarios", handlers.GetUsuariosInternoHandler()).Methods("GET")
 
 	// Documentación Swagger UI
-	httpRouter.PathPrefix("/docs/").Handler(http.StripPrefix("/docs/", http.FileServer(http.Dir("./static"))))
+	docsFS, _ := fs.Sub(staticFiles, "static")
+    httpRouter.PathPrefix("/docs/").Handler(http.StripPrefix("/docs/", http.FileServer(http.FS(docsFS))))
+
 	httpRouter.HandleFunc("/api/docs", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "docs/api.md")
 	})
@@ -103,13 +110,6 @@ func main() {
 	httpRouter.HandleFunc("/api/auth/login", handlers.LoginHandler(authSvc, cfg.JWTSecret)).Methods("POST")
 	httpRouter.HandleFunc("/api/auth/register", handlers.RegisterHandler(authSvc)).Methods("POST")
 	httpRouter.HandleFunc("/api/health", handlers.HealthHandler()).Methods("GET", "HEAD")
-	httpRouter.HandleFunc("/docs/docs.html", func(w http.ResponseWriter, r *http.Request) {
-    http.ServeFile(w, r, "static/docs.html")
-	})
-	httpRouter.HandleFunc("/docs/swagger.json", func(w http.ResponseWriter, r *http.Request) {
-	    w.Header().Set("Content-Type", "application/json")
-	    http.ServeFile(w, r, "static/swagger.json")
-	})
 
 
 	// --- Clusters (proxy al motor de rutas, público) ---

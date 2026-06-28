@@ -91,7 +91,7 @@ func main() {
 	interno.HandleFunc("/usuarios", handlers.GetUsuariosInternoHandler()).Methods("GET")
 
 	// Documentación Swagger UI
-	httpRouter.PathPrefix("/docs/").Handler(http.StripPrefix("/docs/", http.FileServer(http.Dir("static"))))
+	httpRouter.PathPrefix("/docs/").Handler(http.StripPrefix("/docs/", http.FileServer(http.Dir("./static"))))
 	httpRouter.HandleFunc("/api/docs", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "docs/api.md")
 	})

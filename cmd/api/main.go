@@ -103,6 +103,13 @@ func main() {
 	httpRouter.HandleFunc("/api/auth/login", handlers.LoginHandler(authSvc, cfg.JWTSecret)).Methods("POST")
 	httpRouter.HandleFunc("/api/auth/register", handlers.RegisterHandler(authSvc)).Methods("POST")
 	httpRouter.HandleFunc("/api/health", handlers.HealthHandler()).Methods("GET", "HEAD")
+	httpRouter.HandleFunc("/docs/docs.html", func(w http.ResponseWriter, r *http.Request) {
+    http.ServeFile(w, r, "static/docs.html")
+	})
+	httpRouter.HandleFunc("/docs/swagger.json", func(w http.ResponseWriter, r *http.Request) {
+	    w.Header().Set("Content-Type", "application/json")
+	    http.ServeFile(w, r, "static/swagger.json")
+	})
 
 
 	// --- Clusters (proxy al motor de rutas, público) ---

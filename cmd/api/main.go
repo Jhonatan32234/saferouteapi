@@ -1,7 +1,9 @@
 package main
 
 import (
+	"embed"
 	"encoding/json"
+	"io/fs"
 	"log"
 	"net/http"
 
@@ -15,12 +17,10 @@ import (
 	"saferoute/middleware"
 	"saferoute/repository"
 	"saferoute/services"
-	"embed"
-    "io/fs"
 )
 
+//go:embed static
 var staticFiles embed.FS
-
 
 func main() {
 	// ==========================================
@@ -71,16 +71,16 @@ func main() {
 	// ==========================================
 	r := mux.NewRouter()
 
-	// WebSocket - ANTES de los middlewares HTTP (no usa JWT en header, sino query param)
+	// WebSocket - ANTES de los middlewares HTTP
 	handlers.SetJWTSecret(cfg.JWTSecret)
 	r.HandleFunc("/ws/alertas/{ruta_id}", handlers.WebSocketHandler())
 
 	// ==========================================
-	// 8. Middlewares globales (Interceptor Chain)
+	// 8. Middlewares globales
 	// ==========================================
 	httpRouter := r.PathPrefix("/").Subrouter()
 	httpRouter.Use(middleware.SecurityHeaders)
-	httpRouter.Use(middleware.LoggingMiddleware) // Interceptor de Auditoría/Respuesta
+	httpRouter.Use(middleware.LoggingMiddleware)
 	httpRouter.Use(middleware.RateLimitMiddleware(limiter))
 
 	// ==========================================
@@ -95,63 +95,48 @@ func main() {
 	interno.HandleFunc("/reportes/{id}", handlers.GetReporteHandler(reporteSvc)).Methods("GET")
 	interno.HandleFunc("/usuarios", handlers.GetUsuariosInternoHandler()).Methods("GET")
 
-	// Documentación Swagger UI
-	docsFS, _ := fs.Sub(staticFiles, "static")
-    httpRouter.PathPrefix("/docs/").Handler(http.StripPrefix("/docs/", http.FileServer(http.FS(docsFS))))
-
-	httpRouter.HandleFunc("/api/docs", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "docs/api.md")
-	})
+	// ==========================================
+	// DOCUMENTACIÓN SWAGGER (EMBEBIDA)
+	// ==========================================
+	docsFS, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		log.Printf("⚠️ Error cargando documentación embebida: %v", err)
+	} else {
+		httpRouter.PathPrefix("/docs/").Handler(http.StripPrefix("/docs/", http.FileServer(http.FS(docsFS))))
+	}
 
 	// ==========================================
-	// 10. ENDPOINTS PÚBLICOS (sin autenticación)
+	// 10. ENDPOINTS PÚBLICOS
 	// ==========================================
-	// Pipe + Service inyectados en los handlers
 	httpRouter.HandleFunc("/api/auth/login", handlers.LoginHandler(authSvc, cfg.JWTSecret)).Methods("POST")
 	httpRouter.HandleFunc("/api/auth/register", handlers.RegisterHandler(authSvc)).Methods("POST")
 	httpRouter.HandleFunc("/api/health", handlers.HealthHandler()).Methods("GET", "HEAD")
-
-
-	// --- Clusters (proxy al motor de rutas, público) ---
 	httpRouter.HandleFunc("/api/clusters", handlers.ProxyHandler(cfg.MotorRutasURL+"/clusters")).Methods("GET")
 
 	// ==========================================
-	// 11. ENDPOINTS PROTEGIDOS (JWT requerido)
+	// 11. ENDPOINTS PROTEGIDOS (JWT)
 	// ==========================================
 	api := httpRouter.PathPrefix("/api").Subrouter()
 	api.Use(middleware.AuthMiddleware(cfg.JWTSecret))
 
-	// --- Perfil de usuario ---
 	api.HandleFunc("/user/profile", handlers.GetUserProfileHandler(userSvc)).Methods("GET")
 	api.HandleFunc("/user/profile", handlers.UpdateUserProfileHandler(userSvc)).Methods("PUT")
-
-	// --- Historial de notificaciones ---
 	api.HandleFunc("/user/notificaciones", handlers.GetHistorialNotificacionesHandler()).Methods("GET")
 	api.HandleFunc("/user/notificaciones/marcar", handlers.MarcarNotificacionHandler()).Methods("PUT")
 	api.HandleFunc("/user/notificaciones/marcar-todas", handlers.MarcarTodasNotificacionesHandler()).Methods("PUT")
 	api.HandleFunc("/user/notificaciones/sincronizar", handlers.SincronizarNotificacionesHandler()).Methods("POST")
-
-	// --- Suscripciones ---
 	api.HandleFunc("/user/suscribir", handlers.SuscribirRutaHandler()).Methods("POST")
 	api.HandleFunc("/user/desuscribir", handlers.DesuscribirRutaHandler()).Methods("DELETE")
 	api.HandleFunc("/user/suscripciones", handlers.GetSuscripcionesHandler()).Methods("GET")
-
-	// --- Zonas de usuario ---
 	api.HandleFunc("/user/zonas", handlers.ActualizarZonasUsuarioHandler()).Methods("POST")
 	api.HandleFunc("/user/zonas", handlers.ObtenerZonasUsuarioHandler()).Methods("GET")
-
-	// --- Reportes (cualquier rol autenticado) ---
 	api.HandleFunc("/reportes", handlers.CreateReporteHandler(reporteSvc)).Methods("POST")
 	api.HandleFunc("/reportes", handlers.GetReportesHandler(reporteSvc)).Methods("GET")
 	api.HandleFunc("/reportes/cercanos", handlers.GetReportesCercanosHandler(reporteSvc)).Methods("GET")
 	api.HandleFunc("/reportes/estadisticas", handlers.GetEstadisticasHandler()).Methods("GET")
 	api.HandleFunc("/reportes/{id}", handlers.GetReporteHandler(reporteSvc)).Methods("GET")
 	api.HandleFunc("/reportes/{id}/validar", handlers.ValidarReporteHandler(reporteSvc)).Methods("PUT")
-
-	// --- Rutas ---
 	api.HandleFunc("/rutas", handlers.GetRutasHandler(cfg.MotorRutasURL)).Methods("POST")
-
-	// --- Predicciones ---
 	api.HandleFunc("/predicciones/zonas", handlers.ProxyHandler(cfg.MotorPrediccionesURL+"/predicciones/zonas")).Methods("POST")
 	api.HandleFunc("/predicciones/perfil", handlers.ProxyHandler(cfg.MotorPrediccionesURL+"/predicciones/perfil")).Methods("POST")
 
@@ -175,7 +160,7 @@ func main() {
 	}).Methods("GET")
 
 	// ==========================================
-	// 14. CORS RESTRICTIVO
+	// 14. CORS
 	// ==========================================
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{

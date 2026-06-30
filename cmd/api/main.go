@@ -164,15 +164,7 @@ func main() {
 	// ==========================================
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{
-			"http://localhost:8080",
-			"http://localhost:3000",
-			"http://127.0.0.1:8080",
-			"http://127.0.0.1:3000",
-			"http://localhost:5173",
-			"https://saferoute-api-m4i5.onrender.com",
-			"https://saferoute-dashboard.vercel.app",  // ← Agregar dominio de Vercel
-        	"https://saferoute-dashboard-git-*.vercel.app", // Para preview deployments
-			"null",
+			"*",
 		},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Internal-API-Key", "X-Requested-With"},

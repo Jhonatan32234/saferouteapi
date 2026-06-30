@@ -16,6 +16,11 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
+		if r.Method == "OPTIONS" {
+            next.ServeHTTP(w, r)
+            return
+        }
+
 		// Envolver el ResponseWriter para capturar el status code de salida
 		wrapped := &responseWriterWrapper{
 			w:      w,

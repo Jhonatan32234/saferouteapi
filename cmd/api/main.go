@@ -163,14 +163,14 @@ func main() {
 	// 14. CORS
 	// ==========================================
 	c := cors.New(cors.Options{
-		AllowedOrigins: []string{
-			"*",
-		},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Internal-API-Key", "X-Requested-With"},
-		AllowCredentials: true,
-		MaxAge:           300,
-	})
+    AllowOriginFunc: func(origin string) bool {
+        return true // Aceptar cualquier origen
+    },
+    AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+    AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Internal-API-Key", "X-Requested-With"},
+    AllowCredentials: false, // ← Debe ser false cuando se acepta cualquier origen
+    MaxAge:           300,
+})
 
 	handler := c.Handler(r)
 

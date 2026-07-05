@@ -42,31 +42,42 @@ func (r *UsuarioRepository) FindByEmail(email string) (*entities.UsuarioEntity, 
 }
 
 // FindByID busca un usuario por su UUID. Aplica AfterLoad para descifrar el teléfono.
-func (r *UsuarioRepository) FindByID(id string) (*entities.UsuarioEntity, error) {
-	u := &entities.UsuarioEntity{}
-	var ultimoAcceso sql.NullTime
-	err := r.db.QueryRow(
-		`SELECT id, email, password_hash, nombre, tipo, COALESCE(telefono, ''),
-		        created_at, updated_at, ultimo_acceso
-		 FROM usuarios WHERE id = $1`,
-		id,
-	).Scan(
-		&u.ID, &u.Email, &u.PasswordHash, &u.Nombre,
-		&u.Tipo, &u.Telefono, &u.CreatedAt, &u.UpdatedAt, &ultimoAcceso,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if ultimoAcceso.Valid {
-		t := ultimoAcceso.Time
-		u.UltimoAcceso = &t
-	}
-	// Decorator/Hook: descifrar campo sensible al cargar desde BD
-	if err := u.AfterLoad(r.encryptionKey); err != nil {
-		return nil, fmt.Errorf("AfterLoad error: %w", err)
-	}
-	return u, nil
+func (r *UsuarioRepository) FindByID(id string) (*entities.UsuarioPerfilConEstadisticas, error) {
+    u := &entities.UsuarioPerfilConEstadisticas{}
+    var ultimoAcceso sql.NullTime
+
+    err := r.db.QueryRow(
+        `SELECT u.id, u.email, u.password_hash, u.nombre, u.tipo, COALESCE(u.telefono, ''),
+                u.created_at, u.updated_at, u.ultimo_acceso,
+                COALESCE(COUNT(r.id), 0) AS reportes_creados,
+                COALESCE(SUM(CASE WHEN r.confirmaciones > 0 THEN 1 ELSE 0 END), 0) AS reportes_confirmados
+         FROM usuarios u
+         LEFT JOIN reportes r ON r.user_id = u.id
+         WHERE u.id = $1
+         GROUP BY u.id, u.email, u.password_hash, u.nombre, u.tipo, u.telefono,
+                  u.created_at, u.updated_at, u.ultimo_acceso`,
+        id,
+    ).Scan(
+        &u.ID, &u.Email, &u.PasswordHash, &u.Nombre,
+        &u.Tipo, &u.Telefono, &u.CreatedAt, &u.UpdatedAt, &ultimoAcceso,
+        &u.ReportesCreados, &u.ReportesConfirmados,
+    )
+    if err != nil {
+        return nil, err
+    }
+
+    if ultimoAcceso.Valid {
+        t := ultimoAcceso.Time
+        u.UltimoAcceso = &t
+    }
+
+    if err := u.AfterLoad(r.encryptionKey); err != nil {
+        return nil, fmt.Errorf("AfterLoad error: %w", err)
+    }
+
+    return u, nil
 }
+
 
 // Create inserta un nuevo usuario. Aplica BeforeSave para cifrar el teléfono.
 func (r *UsuarioRepository) Create(u *entities.UsuarioEntity) (string, error) {

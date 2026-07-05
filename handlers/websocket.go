@@ -234,6 +234,12 @@ func WebSocketHandler() http.HandlerFunc {
 		        "timestamp": time.Now().UTC().Format(time.RFC3339),
 		    }
 		    conn.WriteJSON(resp)
+		    syncInteraccionMotor("telemetria", userID, msg.RutaID, map[string]interface{}{
+		        "lat": msg.Lat,
+		        "lon": msg.Lon,
+		        "velocidad_kmh": msg.Velocidad,
+		        "timestamp_cliente": msg.Timestamp,
+		    })
 		
 		    // ============================================================
 		    // NUEVO: Retransmitir telemetría a todos los admin-monitor
@@ -290,12 +296,22 @@ func WebSocketHandler() http.HandlerFunc {
 						"vigente":    vigente,
 					}
 					conn.WriteJSON(resp)
+					syncReporteValidado(msg.ReporteID, vigente)
+					syncInteraccionMotor("confirmacion_reporte", userID, msg.RutaID, map[string]interface{}{
+						"reporte_id": msg.ReporteID,
+						"vigente":    vigente,
+					})
 				}
 
 			// ============================================================
 			// ESTADO DEL CONDUCTOR
 			// ============================================================
 			case MsgEstadoConductor:
+				syncInteraccionMotor("estado_conductor", userID, msg.RutaID, map[string]interface{}{
+					"estado": msg.Estado,
+					"lat":    msg.Lat,
+					"lon":    msg.Lon,
+				})
 				log.Printf("🚦 [ESTADO] User=%s Estado=%s", userID, msg.Estado)
 
 				// Broadcast a administradores u otros conductores
@@ -332,13 +348,20 @@ func WebSocketHandler() http.HandlerFunc {
 					ruta, _ := rep["ruta_id"].(string)
 
 					if tipo != "" && lat != 0 && lon != 0 {
-						_, err := database.DB.Exec(
+						var reporte models.ReporteResponse
+						err := database.DB.QueryRow(
 							`INSERT INTO reportes (user_id, tipo, latitud, longitud, nota_voz, ruta_id)
-							 VALUES ($1, $2, $3, $4, $5, $6)`,
+							 VALUES ($1, $2, $3, $4, $5, $6)
+							 RETURNING id, tipo, latitud, longitud, COALESCE(nota_voz,''), ruta_id, timestamp, vigente, confirmaciones`,
 							userID, tipo, lat, lon, nota, ruta,
+						).Scan(
+							&reporte.ID, &reporte.Tipo, &reporte.Latitud, &reporte.Longitud,
+							&reporte.NotaVoz, &reporte.RutaID, &reporte.Timestamp,
+							&reporte.Vigente, &reporte.Confirmaciones,
 						)
 						if err == nil {
 							subidos++
+							syncReporteCreado(reporte)
 						}
 					}
 				}

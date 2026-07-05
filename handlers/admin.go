@@ -6,45 +6,55 @@ import (
 	"io"
 	"log"
 	"net/http"
+
+	"saferoute/models"
+	"saferoute/pipes"
 	"saferoute/services"
 )
 
 // En handlers/admin.go
 
 func RegistrarConductorHandler(authSvc *services.AuthService) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        var req struct {
-            Email    string `json:"email"`
-            Password string `json:"password"`
-            Nombre   string `json:"nombre"`
-            Telefono string `json:"telefono"`
-        }
-        
-        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-            writeError(w, http.StatusBadRequest, "datos inválidos")
-            return
-        }
-        
-        if req.Email == "" || req.Password == "" || req.Nombre == "" {
-            writeError(w, http.StatusBadRequest, "email, password y nombre requeridos")
-            return
-        }
-        
-        // Registrar conductor delegando a la capa de servicio
-        id, err := authSvc.RegisterConductor(req.Email, req.Password, req.Nombre, req.Telefono)
-        if err != nil {
-            writeError(w, http.StatusConflict, err.Error())
-            return
-        }
-        
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusCreated)
-        json.NewEncoder(w).Encode(map[string]string{
-            "id":     id,
-            "status": "conductor registrado",
-            "email":  req.Email,
-        })
-    }
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+			Nombre   string `json:"nombre"`
+			Telefono string `json:"telefono"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "datos inválidos")
+			return
+		}
+
+		validateReq := models.RegisterRequest{
+			Email:    req.Email,
+			Password: req.Password,
+			Nombre:   req.Nombre,
+			Tipo:     "conductor",
+			Telefono: req.Telefono,
+		}
+		if err := pipes.ValidateRegister(&validateReq); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		// Registrar conductor delegando a la capa de servicio
+		id, err := authSvc.RegisterConductor(validateReq.Email, validateReq.Password, validateReq.Nombre, validateReq.Telefono)
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{
+			"id":     id,
+			"status": "conductor registrado",
+			"email":  req.Email,
+		})
+	}
 }
 
 func GetAdminResumenHandler(motorNLPURL string, motorLLMURL string) http.HandlerFunc {
@@ -66,9 +76,9 @@ func GetAdminResumenHandler(motorNLPURL string, motorLLMURL string) http.Handler
 
 		// Parsear respuesta NLP
 		var nlpResponse struct {
-			Topicos        []map[string]interface{} `json:"topicos"`
-			TotalReportes  int                      `json:"total_reportes"`
-			TopicoDominante map[string]interface{}  `json:"topico_dominante"`
+			Topicos         []map[string]interface{} `json:"topicos"`
+			TotalReportes   int                      `json:"total_reportes"`
+			TopicoDominante map[string]interface{}   `json:"topico_dominante"`
 		}
 		if err := json.Unmarshal(nlpBody, &nlpResponse); err != nil {
 			log.Printf("ERROR parseando NLP: %v", err)

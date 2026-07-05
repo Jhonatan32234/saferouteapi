@@ -9,8 +9,9 @@ import (
 
 // ValidateLogin valida que el DTO de login tenga los campos requeridos.
 // Devuelve un error descriptivo si la validación falla.
-func ValidateLogin(req models.LoginRequest) error {
-	if strings.TrimSpace(req.Email) == "" {
+func ValidateLogin(req *models.LoginRequest) error {
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+	if req.Email == "" {
 		return fmt.Errorf("el campo 'email' es requerido")
 	}
 	if !strings.Contains(req.Email, "@") {
@@ -27,6 +28,7 @@ func ValidateLogin(req models.LoginRequest) error {
 func ValidateRegister(req *models.RegisterRequest) error {
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	req.Nombre = strings.TrimSpace(req.Nombre)
+	req.Telefono = strings.TrimSpace(req.Telefono)
 
 	if req.Email == "" {
 		return fmt.Errorf("el campo 'email' es requerido")
@@ -40,8 +42,11 @@ func ValidateRegister(req *models.RegisterRequest) error {
 	if req.Nombre == "" {
 		return fmt.Errorf("el campo 'nombre' es requerido")
 	}
-	if req.Tipo != "conductor" && req.Tipo != "admin" {
-		return fmt.Errorf("el campo 'tipo' debe ser 'conductor' o 'admin'")
+	if req.Tipo == "" {
+		req.Tipo = "conductor"
+	}
+	if req.Tipo != "conductor" {
+		return fmt.Errorf("el campo 'tipo' solo puede ser 'conductor' para el registro público")
 	}
 	return nil
 }

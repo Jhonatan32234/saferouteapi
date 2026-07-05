@@ -48,6 +48,7 @@ func CreateReporteHandler(reporteSvc *services.ReporteService) http.HandlerFunc 
 		}
 
 		log.Printf("✅ [REPORTE] Creado ID=%s", reporte.ID)
+		syncReporteCreado(reporte)
 
 		// 5. Notificar en tiempo real a suscriptores de la ruta (background)
 		go func() {
@@ -170,6 +171,7 @@ func ValidarReporteHandler(reporteSvc *services.ReporteService) http.HandlerFunc
 			writeError(w, http.StatusInternalServerError, "error actualizando reporte")
 			return
 		}
+		syncReporteValidado(reporteID, accion.Vigente)
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{

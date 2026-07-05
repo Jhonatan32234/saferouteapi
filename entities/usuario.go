@@ -24,6 +24,16 @@ type UsuarioEntity struct {
 	UltimoAcceso *time.Time
 }
 
+type UsuarioPerfilConEstadisticas struct {
+    UsuarioEntity
+    ReportesCreados     int
+    ReportesConfirmados int
+}
+
+func (u *UsuarioPerfilConEstadisticas) AfterLoad(key []byte) error {
+    return u.UsuarioEntity.AfterLoad(key)
+}
+
 func (u *UsuarioEntity) BeforeSave(key []byte) error {
     if u.Telefono == "" {
         return nil

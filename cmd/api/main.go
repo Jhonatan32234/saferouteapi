@@ -60,6 +60,7 @@ func main() {
 	authSvc := services.NewAuthService(usuarioRepo, encryptionKey, cfg.JWTSecret)
 	reporteSvc := services.NewReporteService(reporteRepo)
 	userSvc := services.NewUserService(usuarioRepo, encryptionKey)
+	motorSyncSvc := services.NewMotorSyncService(cfg.MotorNLPURL, cfg.MotorPrediccionesURL, cfg.InternalAPIKey)
 
 	// ==========================================
 	// 6. Configurar Rate Limiter
@@ -73,6 +74,7 @@ func main() {
 
 	// WebSocket - ANTES de los middlewares HTTP
 	handlers.SetJWTSecret(cfg.JWTSecret)
+	handlers.SetMotorSyncService(motorSyncSvc)
 	r.HandleFunc("/ws/alertas/{ruta_id}", handlers.WebSocketHandler())
 
 	// ==========================================

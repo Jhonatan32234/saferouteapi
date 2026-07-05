@@ -31,16 +31,16 @@ type AuthResponse struct {
 // ===== PERFIL DE USUARIO =====
 
 type UserProfile struct {
-	ID                 string    `json:"id"`
-	Email              string    `json:"email"`
-	Nombre             string    `json:"nombre"`
-	Tipo               string    `json:"tipo"`
-	Telefono           string    `json:"telefono,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
-	UltimoAcceso       time.Time `json:"ultimo_acceso,omitempty"`
-	ReportesCreados    int       `json:"reportes_creados"`
-	ReportesConfirmados int      `json:"reportes_confirmados"`
+    ID                  string    `json:"id"`
+    Email               string    `json:"email"`
+    Nombre              string    `json:"nombre"`
+    Tipo                string    `json:"tipo"`
+    Telefono            string    `json:"telefono"`
+    CreatedAt           time.Time `json:"created_at,omitempty"`
+    UpdatedAt           time.Time `json:"updated_at,omitempty"`
+    UltimoAcceso        time.Time `json:"ultimo_acceso,omitempty"`
+    ReportesCreados     int       `json:"reportes_creados"`
+    ReportesConfirmados int       `json:"reportes_confirmados"`
 }
 
 type UpdateProfileRequest struct {

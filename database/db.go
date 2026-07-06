@@ -42,7 +42,63 @@ func Connect(databaseURL string) error {
 
     isConnected = true
     log.Println("✅ Conexión a PostgreSQL establecida")
+
+    // Ejecutar migraciones automáticamente
+    if err := RunMigrations(DB); err != nil {
+        log.Printf("⚠️ Error al ejecutar migraciones de inicio: %v", err)
+    }
+
     return nil
+}
+
+// RunMigrations ejecuta las sentencias SQL necesarias para estructurar las nuevas tablas de viajes y soporte PostGIS
+func RunMigrations(db *sql.DB) error {
+	migrations := []string{
+		`CREATE EXTENSION IF NOT EXISTS postgis;`,
+		`CREATE TABLE IF NOT EXISTS viajes (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id UUID NOT NULL,
+			ruta_id VARCHAR(255) NOT NULL,
+			origen_lat DOUBLE PRECISION NOT NULL,
+			origen_lon DOUBLE PRECISION NOT NULL,
+			destino_lat DOUBLE PRECISION NOT NULL,
+			destino_lon DOUBLE PRECISION NOT NULL,
+			polyline_ruta TEXT NOT NULL,
+			geom_ruta GEOMETRY(LineString, 4326),
+			estado VARCHAR(50) DEFAULT 'activo',
+			fecha_inicio TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			fecha_fin TIMESTAMP WITH TIME ZONE,
+			ultimo_heartbeat TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			creado_en TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			CONSTRAINT chk_estado CHECK (estado IN ('activo', 'finalizado', 'desviado', 'parada_tecnica', 'contacto_perdido', 'cancelado'))
+		);`,
+		`CREATE TABLE IF NOT EXISTS historial_viaje_coordenadas (
+			id BIGSERIAL PRIMARY KEY,
+			viaje_id UUID NOT NULL REFERENCES viajes(id) ON DELETE CASCADE,
+			latitud DOUBLE PRECISION NOT NULL,
+			longitud DOUBLE PRECISION NOT NULL,
+			velocidad_kmh DOUBLE PRECISION,
+			timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_viajes_estado ON viajes(estado);`,
+		`CREATE INDEX IF NOT EXISTS idx_viajes_user_id ON viajes(user_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_historial_viaje_id ON historial_viaje_coordenadas(viaje_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_viajes_geom ON viajes USING gist(geom_ruta);`,
+	}
+
+	for i, q := range migrations {
+		if _, err := db.Exec(q); err != nil {
+			// Si falla PostGIS (extensión), es probable que el usuario de la BD no sea superusuario.
+			// Loggear advertencia y continuar, ya que podría estar habilitado de antemano o en Neon.
+			if i == 0 {
+				log.Printf("⚠️ Advertencia: No se pudo verificar la extensión PostGIS: %v. Continuando...", err)
+				continue
+			}
+			return fmt.Errorf("error ejecutando migración %d: %w", i, err)
+		}
+	}
+	log.Println("✅ Migraciones de viajes e historial ejecutadas/verificadas correctamente")
+	return nil
 }
 
 func Close() {

@@ -11,6 +11,7 @@ import (
 	"saferoute/database"
 	"saferoute/middleware"
 	"saferoute/models"
+	"saferoute/services"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
@@ -30,7 +31,12 @@ var (
 	suscriptoresPorUsuario = make(map[string]map[string]bool)
 	subMu                  sync.RWMutex
 	jwtSecret              string
+	viajeSvc               *services.ViajeService
 )
+
+func SetViajeService(svc *services.ViajeService) {
+	viajeSvc = svc
+}
 
 // ============================================================
 // NUEVO: Tipos de mensaje WebSocket
@@ -43,6 +49,8 @@ const (
 	MsgSyncPendientes   = "sync_pendientes"
 	MsgHistorialInicial = "historial_inicial"
 	MsgNuevoReporte     = "nuevo_reporte"
+	MsgAlertaDesvio     = "alerta_desvio"
+	MsgAlertaTimeout    = "alerta_timeout"
 )
 
 // MensajeTelemetria representa datos GPS en tiempo real
@@ -221,6 +229,17 @@ func WebSocketHandler() http.HandlerFunc {
 		            log.Printf("⚠️ [TELEMETRÍA] No se actualizó ubicación (user_id no es UUID): %v", err)
 		        }
 		    }
+
+		    // NUEVO: Registrar en el viaje y verificar desvíos
+		    var nuevoEstado string
+		    var alertaDesvio bool
+		    if viajeSvc != nil && userID != "admin" && userID != "anonimo" {
+		        var err error
+		        nuevoEstado, alertaDesvio, err = viajeSvc.ActualizarUbicacionViaje(userID, msg.Lat, msg.Lon, msg.Velocidad)
+		        if err != nil {
+		            log.Printf("⚠️ [TELEMETRÍA] Error actualizando viaje para %s: %v", userID, err)
+		        }
+		    }
 		
 		    // 2. Buscar reportes cercanos y notificar al conductor
 		    if database.DB != nil {
@@ -233,6 +252,9 @@ func WebSocketHandler() http.HandlerFunc {
 		        "status":    "ok",
 		        "timestamp": time.Now().UTC().Format(time.RFC3339),
 		    }
+		    if nuevoEstado != "" {
+		        resp["estado_viaje"] = nuevoEstado
+		    }
 		    conn.WriteJSON(resp)
 		    syncInteraccionMotor("telemetria", userID, msg.RutaID, map[string]interface{}{
 		        "lat": msg.Lat,
@@ -242,7 +264,7 @@ func WebSocketHandler() http.HandlerFunc {
 		    })
 		
 		    // ============================================================
-		    // NUEVO: Retransmitir telemetría a todos los admin-monitor
+		    // NUEVO: Retransmitir telemetría y desvíos a todos los admin-monitor
 		    // ============================================================
 		    subMu.RLock()
 		    if adminConns, ok := suscriptores["admin-monitor"]; ok {
@@ -255,10 +277,30 @@ func WebSocketHandler() http.HandlerFunc {
 		            "ruta_id":         msg.RutaID,
 		            "timestamp":       msg.Timestamp,
 		        }
+		        if nuevoEstado != "" {
+		            telemetriaMsg["estado_viaje"] = nuevoEstado
+		        }
 		        telemetriaBytes, _ := json.Marshal(telemetriaMsg)
 		        for adminConn := range adminConns {
 		            if adminConn != conn { // No reenviar al mismo que envió
 		                adminConn.WriteMessage(websocket.TextMessage, telemetriaBytes)
+		            }
+		        }
+
+		        // Si hay alerta de desvío, emitir un mensaje de alerta explícito
+		        if alertaDesvio {
+		            alertaMsg := map[string]interface{}{
+		                "tipo":      MsgAlertaDesvio,
+		                "user_id":   userID,
+		                "ruta_id":   msg.RutaID,
+		                "lat":       msg.Lat,
+		                "lon":       msg.Lon,
+		                "mensaje":   fmt.Sprintf("🚨 Conductor %s se ha desviado de su ruta planificada", userID),
+		                "timestamp": time.Now().UTC().Format(time.RFC3339),
+		            }
+		            alertaBytes, _ := json.Marshal(alertaMsg)
+		            for adminConn := range adminConns {
+		                adminConn.WriteMessage(websocket.TextMessage, alertaBytes)
 		            }
 		        }
 		    }
@@ -592,4 +634,29 @@ func GetEstadoSuscriptores() map[string]interface{} {
 	}
 	estado["rutas"] = rutas
 	return estado
+}
+
+// BroadcastAdminMonitor transmite datos a todos los clientes del canal admin-monitor
+func BroadcastAdminMonitor(data interface{}) {
+	subMu.RLock()
+	defer subMu.RUnlock()
+
+	adminConns, ok := suscriptores["admin-monitor"]
+	if !ok {
+		return
+	}
+
+	msg, err := json.Marshal(data)
+	if err != nil {
+		log.Printf("⚠️ [BroadcastAdmin] Error serializando mensaje: %v", err)
+		return
+	}
+
+	for conn := range adminConns {
+		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+			log.Printf("⚠️ [BroadcastAdmin] Error enviando a admin: %v", err)
+			conn.Close()
+			delete(adminConns, conn)
+		}
+	}
 }

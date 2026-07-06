@@ -151,9 +151,10 @@ type RutaResponse struct {
 	Nombre             string    `json:"nombre"`
 	DistanciaKM        float64   `json:"distancia_km"`
 	TiempoMinutos      int       `json:"tiempo_minutos"`
-	Seguridad          string    `json:"seguridad"` // verde, amarillo, rojo
+	Seguridad          string    `json:"seguridad"`
 	RiesgoCombinado    float64   `json:"riesgo_combinado"`
 	ClustersAtravesados []int    `json:"clusters_atravesados"`
+	Polyline           string    `json:"polyline"` // <--- AGREGAR ESTA LÍNEA
 }
 
 type RutasResponse struct {
@@ -233,4 +234,53 @@ var TiposValidos = map[string]bool{
 	"niebla":     true,
 	"bloqueo":    true,
 	"otro":       true,
+}
+
+// ===== SEGUIMIENTO DE VIAJES Y TRAYECTOS =====
+
+type Viaje struct {
+	ID              string     `json:"id"`
+	UserID          string     `json:"user_id"`
+	RutaID          string     `json:"ruta_id"`
+	OrigenLat       float64    `json:"origen_lat"`
+	OrigenLon       float64    `json:"origen_lon"`
+	DestinoLat      float64    `json:"destino_lat"`
+	DestinoLon      float64    `json:"destino_lon"`
+	PolylineRuta    string     `json:"polyline_ruta"`
+	Estado          string     `json:"estado"`
+	FechaInicio     time.Time  `json:"fecha_inicio"`
+	FechaFin        *time.Time `json:"fecha_fin,omitempty"`
+	UltimoHeartbeat time.Time  `json:"ultimo_heartbeat"`
+	CreadoEn        time.Time  `json:"creado_en"`
+}
+
+type IniciarViajeRequest struct {
+	OrigenLat    float64 `json:"origen_lat"`
+	OrigenLon    float64 `json:"origen_lon"`
+	DestinoLat   float64 `json:"destino_lat"`
+	DestinoLon   float64 `json:"destino_lon"`
+	PolylineRuta string  `json:"polyline_ruta"`
+	RutaID       string  `json:"ruta_id"`
+}
+
+type FinalizarViajeRequest struct {
+	ViajeID  string `json:"viaje_id"`
+	Password string `json:"password,omitempty"` // Contraseña del usuario para verificar cancelación anticipada
+}
+
+type ViajeActivoAdmin struct {
+	ViajeID         string    `json:"viaje_id"`
+	UserID          string    `json:"user_id"`
+	NombreConductor string    `json:"nombre_conductor"`
+	RutaID          string    `json:"ruta_id"`
+	OrigenLat       float64   `json:"origen_lat"`
+	OrigenLon       float64   `json:"origen_lon"`
+	DestinoLat      float64   `json:"destino_lat"`
+	DestinoLon      float64   `json:"destino_lon"`
+	PolylineRuta    string    `json:"polyline_ruta"`
+	Estado          string    `json:"estado"`
+	UltimoHeartbeat time.Time `json:"ultimo_heartbeat"`
+	UltimaLatitud   float64   `json:"ultima_latitud"`
+	UltimaLongitud  float64   `json:"ultima_longitud"`
+	UltimaVelocidad float64   `json:"ultima_velocidad_kmh"`
 }

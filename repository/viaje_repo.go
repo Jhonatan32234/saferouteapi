@@ -16,7 +16,6 @@ func NewViajeRepository(db *sql.DB) *ViajeRepository {
 	return &ViajeRepository{db: db}
 }
 
-// Create inserta un nuevo viaje. Recibe el viaje y la representación WKT de la ruta (LINESTRING).
 func (r *ViajeRepository) Create(viaje *models.Viaje, wktLineString string) (string, error) {
 	var id string
 	query := `
@@ -39,7 +38,6 @@ func (r *ViajeRepository) Create(viaje *models.Viaje, wktLineString string) (str
 	return id, nil
 }
 
-// FindByID busca un viaje por su ID
 func (r *ViajeRepository) FindByID(id string) (*models.Viaje, error) {
 	v := &models.Viaje{}
 	var fechaFin sql.NullTime
@@ -64,7 +62,6 @@ func (r *ViajeRepository) FindByID(id string) (*models.Viaje, error) {
 	return v, nil
 }
 
-// FindActiveByUserID busca el viaje activo actual de un conductor
 func (r *ViajeRepository) FindActiveByUserID(userID string) (*models.Viaje, error) {
 	v := &models.Viaje{}
 	var fechaFin sql.NullTime
@@ -91,7 +88,6 @@ func (r *ViajeRepository) FindActiveByUserID(userID string) (*models.Viaje, erro
 	return v, nil
 }
 
-// FindAllActive consulta todos los viajes activos para el Dashboard de Administración
 func (r *ViajeRepository) FindAllActive() ([]models.ViajeActivoAdmin, error) {
 	query := `
 		SELECT 
@@ -144,7 +140,6 @@ func (r *ViajeRepository) FindAllActive() ([]models.ViajeActivoAdmin, error) {
 	return viajes, nil
 }
 
-// UpdateEstado actualiza el estado de un viaje
 func (r *ViajeRepository) UpdateEstado(id string, estado string) error {
 	var err error
 	if estado == "finalizado" || estado == "cancelado" {
@@ -155,17 +150,14 @@ func (r *ViajeRepository) UpdateEstado(id string, estado string) error {
 	return err
 }
 
-// UpdateHeartbeat registra una coordenada en el historial, actualiza el latido del viaje,
-// y retorna las distancias de desviación y de destino calculadas por PostGIS.
+
 func (r *ViajeRepository) UpdateHeartbeat(viajeID string, lat, lon, vel float64) (distanciaDesvio float64, distanciaDestino float64, err error) {
-	// Iniciar una transacción
 	tx, err := r.db.Begin()
 	if err != nil {
 		return 0, 0, err
 	}
 	defer tx.Rollback()
 
-	// 1. Insertar la coordenada en el historial
 	_, err = tx.Exec(`
 		INSERT INTO historial_viaje_coordenadas (viaje_id, latitud, longitud, velocidad_kmh)
 		VALUES ($1, $2, $3, $4)`,
@@ -175,7 +167,6 @@ func (r *ViajeRepository) UpdateHeartbeat(viajeID string, lat, lon, vel float64)
 		return 0, 0, fmt.Errorf("error insertando coordenada de historial: %w", err)
 	}
 
-	// 2. Actualizar el último heartbeat del viaje
 	_, err = tx.Exec(`
 		UPDATE viajes 
 		SET ultimo_heartbeat = NOW() 
@@ -186,8 +177,6 @@ func (r *ViajeRepository) UpdateHeartbeat(viajeID string, lat, lon, vel float64)
 		return 0, 0, fmt.Errorf("error actualizando heartbeat: %w", err)
 	}
 
-	// 3. Consultar las distancias usando PostGIS
-	// ST_Distance calcula la distancia geodésica en metros al usar ::geography
 	queryDistancias := `
 		SELECT 
 			COALESCE(ST_Distance(ST_SetSRID(ST_Point($1, $2), 4326)::geography, geom_ruta::geography), 0.0) AS dist_desvio,
@@ -197,14 +186,12 @@ func (r *ViajeRepository) UpdateHeartbeat(viajeID string, lat, lon, vel float64)
 
 	err = tx.QueryRow(queryDistancias, lon, lat, viajeID).Scan(&distanciaDesvio, &distanciaDestino)
 	if err != nil {
-		// Fallback simple por si falla PostGIS por alguna razón (por ejemplo, LineString vacío o nulo)
-		log.Printf("⚠️ Fallback: Error calculando distancias con PostGIS: %v. Usando 0.0 por defecto", err)
+		log.Printf("Fallback: Error calculando distancias con PostGIS: %v. Usando 0.0 por defecto", err)
 		distanciaDesvio = 0.0
 		distanciaDestino = 99999.0
-		err = nil // Ignoramos el error en el fallback para continuar operando
+		err = nil
 	}
 
-	// Confirmar la transacción
 	if err = tx.Commit(); err != nil {
 		return 0, 0, err
 	}
@@ -212,7 +199,6 @@ func (r *ViajeRepository) UpdateHeartbeat(viajeID string, lat, lon, vel float64)
 	return distanciaDesvio, distanciaDestino, nil
 }
 
-// GetLastCoordinate obtiene la última coordenada reportada para un viaje
 func (r *ViajeRepository) GetLastCoordinate(viajeID string) (lat float64, lon float64, found bool, err error) {
 	err = r.db.QueryRow(`
 		SELECT latitud, longitud 

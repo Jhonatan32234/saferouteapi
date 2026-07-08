@@ -7,19 +7,15 @@ import (
 	"saferoute/entities"
 )
 
-// ReporteRepository define las operaciones de acceso a datos para la tabla `reportes`.
-// Todas las consultas usan EXCLUSIVAMENTE placeholders parametrizados ($1, $2...).
+
 type ReporteRepository struct {
 	db *sql.DB
 }
 
-// NewReporteRepository crea una nueva instancia del repositorio.
 func NewReporteRepository(db *sql.DB) *ReporteRepository {
 	return &ReporteRepository{db: db}
 }
 
-// Create inserta un nuevo reporte y devuelve la entidad con todos los campos
-// rellenados por PostgreSQL (id, timestamp, vigente, confirmaciones).
 func (r *ReporteRepository) Create(e *entities.ReporteEntity) (*entities.ReporteEntity, error) {
 	result := &entities.ReporteEntity{}
 	err := r.db.QueryRow(
@@ -53,7 +49,6 @@ func (r *ReporteRepository) FindAll(tipo string, vigente *bool, limit int, offse
 		args = append(args, *vigente)
 	}
 
-	// Contar total para validar offset
 	var total int
 	countQuery := "SELECT COUNT(*) FROM reportes WHERE 1=1"
 	countArgs := []interface{}{}
@@ -70,7 +65,6 @@ func (r *ReporteRepository) FindAll(tipo string, vigente *bool, limit int, offse
 	}
 	r.db.QueryRow(countQuery, countArgs...).Scan(&total)
 
-	// Si offset > total, devolver vacío sin error
 	if offset >= total {
 		return []entities.ReporteEntity{}, nil
 	}
@@ -103,7 +97,6 @@ func (r *ReporteRepository) FindAll(tipo string, vigente *bool, limit int, offse
 	return reportes, nil
 }
 
-// FindByID busca un reporte por su UUID.
 func (r *ReporteRepository) FindByID(id string) (*entities.ReporteEntity, error) {
 	e := &entities.ReporteEntity{}
 	err := r.db.QueryRow(
@@ -121,9 +114,7 @@ func (r *ReporteRepository) FindByID(id string) (*entities.ReporteEntity, error)
 	return e, nil
 }
 
-// FindCercanos busca reportes vigentes dentro de un radio en kilómetros usando la fórmula de Haversine.
 func (r *ReporteRepository) FindCercanos(lat, lon, radioKm float64, limit int) ([]entities.ReporteEntity, error) {
-	// Fórmula de Haversine en SQL para calcular distancia geográfica
 	rows, err := r.db.Query(
 		`SELECT id, COALESCE(user_id::text,''), tipo, latitud, longitud,
 		        COALESCE(nota_voz,''), ruta_id, timestamp, vigente, confirmaciones,
@@ -164,7 +155,6 @@ func (r *ReporteRepository) FindCercanos(lat, lon, radioKm float64, limit int) (
 	return reportes, nil
 }
 
-// Validar actualiza el estado vigente de un reporte e incrementa las confirmaciones si es necesario.
 func (r *ReporteRepository) Validar(id string, vigente bool) error {
 	var err error
 	if vigente {
@@ -181,8 +171,6 @@ func (r *ReporteRepository) Validar(id string, vigente bool) error {
 	return err
 }
 
-// SuscribirRuta suscribe a un usuario a una ruta al crear un reporte.
-// Usa ON CONFLICT para ser idempotente (no falla si ya existe la suscripción).
 func (r *ReporteRepository) SuscribirRuta(userID, rutaID string) error {
 	_, err := r.db.Exec(
 		`INSERT INTO suscripciones_rutas (user_id, ruta_id, suscrito, fecha_suscripcion, fecha_actualizacion)

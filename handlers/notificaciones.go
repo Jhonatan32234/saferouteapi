@@ -14,10 +14,8 @@ import (
 	"saferoute/models"
 )
 
-// GetHistorialNotificacionesHandler obtiene el historial de notificaciones del usuario
 func GetHistorialNotificacionesHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Obtener user_id del contexto
 		userID := middleware.GetUserID(r)
 		
 		if userID == "" {
@@ -38,7 +36,6 @@ func GetHistorialNotificacionesHandler() http.HandlerFunc {
             return
         }
 
-		// Parámetros de paginación
 		paginaStr := r.URL.Query().Get("pagina")
 		limiteStr := r.URL.Query().Get("limite")
 		soloNoLeidas := r.URL.Query().Get("no_leidas") == "true"
@@ -55,10 +52,9 @@ func GetHistorialNotificacionesHandler() http.HandlerFunc {
 
 		offset := (pagina - 1) * limite
 
-		log.Printf("📊 [HISTORIAL] Consultando notificaciones para usuario %s (pagina=%d, limite=%d)", 
+		log.Printf("[HISTORIAL] Consultando notificaciones para usuario %s (pagina=%d, limite=%d)", 
 			userID, pagina, limite)
 
-		// CORREGIDO: Usar NULL en lugar de '' para UUIDs
 		query := `SELECT id, user_id, tipo, 
 					COALESCE(reporte_id, NULL) as reporte_id,
 					COALESCE(latitud, 0) as latitud, 
@@ -78,21 +74,19 @@ func GetHistorialNotificacionesHandler() http.HandlerFunc {
 			args = append(args, false)
 		}
 
-		// Contar total
 		countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM notificaciones_historial WHERE user_id = '%s'`, userID)
 		if soloNoLeidas {
 		    countQuery += " AND leida = false"
 		}
 		
 		var total int
-		err := database.DB.QueryRow(countQuery).Scan(&total)  // SIN userID
+		err := database.DB.QueryRow(countQuery).Scan(&total)
 		if err != nil {
-		    log.Printf("❌ [HISTORIAL] Error contando notificaciones: %v", err)
+		    log.Printf("[HISTORIAL] Error contando notificaciones: %v", err)
 		    writeError(w, http.StatusInternalServerError, "error obteniendo notificaciones")
 		    return
 		}
 
-		// Obtener notificaciones no leídas
 		var noLeidas int
 		err = database.DB.QueryRow(
 			"SELECT COUNT(*) FROM notificaciones_historial WHERE user_id = $1 AND leida = false",
@@ -113,7 +107,7 @@ func GetHistorialNotificacionesHandler() http.HandlerFunc {
 
 		rows, err := database.DB.Query(query, args...)
 		if err != nil {
-			log.Printf("❌ [HISTORIAL] Error consultando notificaciones: %v", err)
+			log.Printf("[HISTORIAL] Error consultando notificaciones: %v", err)
 			writeError(w, http.StatusInternalServerError, "error obteniendo notificaciones")
 			return
 		}
@@ -123,8 +117,7 @@ func GetHistorialNotificacionesHandler() http.HandlerFunc {
 		for rows.Next() {
 			var n models.NotificacionHistorial
 			var fechaLectura *time.Time
-			var reporteID *string // Usar puntero para manejar NULL
-
+			var reporteID *string
 			err := rows.Scan(
 				&n.ID, &n.UserID, &n.Tipo, &reporteID,
 				&n.Latitud, &n.Longitud, &n.NotaVoz,
@@ -136,7 +129,6 @@ func GetHistorialNotificacionesHandler() http.HandlerFunc {
 				continue
 			}
 
-			// Si reporteID es NULL, asignar string vacío
 			if reporteID != nil {
 				n.ReporteID = *reporteID
 			} else {
@@ -155,7 +147,7 @@ func GetHistorialNotificacionesHandler() http.HandlerFunc {
 			totalPaginas = 1
 		}
 
-		log.Printf("✅ [HISTORIAL] Encontradas %d notificaciones para usuario %s", 
+		log.Printf("[HISTORIAL] Encontradas %d notificaciones para usuario %s", 
 			len(notificaciones), userID)
 
 		response := models.NotificacionHistorialResponse{
@@ -170,7 +162,6 @@ func GetHistorialNotificacionesHandler() http.HandlerFunc {
 		json.NewEncoder(w).Encode(response)
 	}
 }
-// handlers/notificaciones.go - MarcarNotificacionHandler CORREGIDO
 
 func MarcarNotificacionHandler() http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
@@ -181,10 +172,8 @@ func MarcarNotificacionHandler() http.HandlerFunc {
             return
         }
 
-        // Obtener ID de la query string
         notificacionID := r.URL.Query().Get("id")
         
-        // Si no viene en query, intentar del body
         if notificacionID == "" {
             var bodyReq struct {
                 NotificacionID string `json:"notificacion_id"`
@@ -195,21 +184,18 @@ func MarcarNotificacionHandler() http.HandlerFunc {
         }
 
         if notificacionID == "" {
-            log.Printf("❌ [MARCAR] ID de notificación no proporcionado")
+            log.Printf("[MARCAR] ID de notificación no proporcionado")
             writeError(w, http.StatusBadRequest, "id de notificación requerido")
             return
         }
 
-        log.Printf("📝 [MARCAR] Marcando notificación %s como leída para usuario %s", notificacionID, userID)
+        log.Printf("[MARCAR] Marcando notificación %s como leída para usuario %s", notificacionID, userID)
 
-        // Decodificar body (leida true/false)
         var req models.MarcarNotificacionRequest
         if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-            // Si no se puede decodificar, usar true por defecto
             req.Leida = true
         }
 
-        // Actualizar usando database.DB directamente
         query := `UPDATE notificaciones_historial 
                   SET leida = $1, fecha_lectura = CASE WHEN $1 THEN NOW() ELSE NULL END
                   WHERE id = $2 AND user_id = $3
@@ -228,7 +214,7 @@ func MarcarNotificacionHandler() http.HandlerFunc {
             return
         }
 
-        log.Printf("✅ [MARCAR] Notificación %s marcada como leida=%v", id, req.Leida)
+        log.Printf("[MARCAR] Notificación %s marcada como leida=%v", id, req.Leida)
 
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(map[string]interface{}{
@@ -239,7 +225,6 @@ func MarcarNotificacionHandler() http.HandlerFunc {
     }
 }
 
-// MarcarTodasNotificacionesHandler marca todas las notificaciones como leídas
 func MarcarTodasNotificacionesHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := middleware.GetUserID(r)
@@ -271,7 +256,6 @@ func MarcarTodasNotificacionesHandler() http.HandlerFunc {
 	}
 }
 
-// SincronizarNotificacionesHandler sincroniza notificaciones desde última fecha
 func SincronizarNotificacionesHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := middleware.GetUserID(r)
@@ -286,11 +270,9 @@ func SincronizarNotificacionesHandler() http.HandlerFunc {
 
 		body := json.NewDecoder(r.Body)
 		if err := body.Decode(&req); err != nil {
-			// Si no hay body, usar timestamp de hace 24 horas
 			req.UltimaSincronizacion = time.Now().Add(-24 * time.Hour)
 		}
 
-		// CORREGIDO: Usar NULL en lugar de '' para UUIDs
 		rows, err := database.DB.Query(
 			`SELECT id, user_id, tipo, 
 					COALESCE(reporte_id, NULL) as reporte_id,

@@ -38,9 +38,6 @@ func SetViajeService(svc *services.ViajeService) {
 	viajeSvc = svc
 }
 
-// ============================================================
-// NUEVO: Tipos de mensaje WebSocket
-// ============================================================
 const (
 	MsgTelemetria       = "telemetria"
 	MsgAlertaProximidad = "alerta_proximidad"
@@ -53,7 +50,6 @@ const (
 	MsgAlertaTimeout    = "alerta_timeout"
 )
 
-// MensajeTelemetria representa datos GPS en tiempo real
 type MensajeTelemetria struct {
 	Tipo      string  `json:"tipo"`
 	Lat       float64 `json:"lat"`
@@ -63,7 +59,6 @@ type MensajeTelemetria struct {
 	Timestamp string  `json:"timestamp"`
 }
 
-// MensajeConfirmacion representa validación de un reporte
 type MensajeConfirmacion struct {
 	Tipo       string `json:"tipo"`
 	ReporteID  string `json:"reporte_id"`
@@ -72,7 +67,6 @@ type MensajeConfirmacion struct {
 	Timestamp  string `json:"timestamp"`
 }
 
-// MensajeEntrante es cualquier mensaje que llega del cliente
 type MensajeEntrante struct {
 	Tipo      string  `json:"tipo"`
 	Lat       float64 `json:"lat,omitempty"`
@@ -90,15 +84,11 @@ func SetJWTSecret(secret string) {
 	jwtSecret = secret
 }
 
-// ============================================================
-// WebSocketHandler - Multimensaje
-// ============================================================
 
 func WebSocketHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rutaID := mux.Vars(r)["ruta_id"]
 
-		// Autenticación
 		userID := r.URL.Query().Get("user_id")
 		if userID == "" {
 			authHeader := r.Header.Get("Authorization")
@@ -118,9 +108,8 @@ func WebSocketHandler() http.HandlerFunc {
 			userID = "anonimo"
 		}
 
-		log.Printf("🔌 [WS] Nueva conexión: User=%s, Ruta=%s", userID, rutaID)
+		log.Printf("[WS] Nueva conexión: User=%s, Ruta=%s", userID, rutaID)
 
-		// Guardar suscripción en BD
 		if userID != "anonimo" && userID != "admin" && database.DB != nil {
 		    _, err := database.DB.Exec(
 		        `INSERT INTO suscripciones_rutas (user_id, ruta_id, suscrito, fecha_suscripcion, fecha_actualizacion)
@@ -134,7 +123,6 @@ func WebSocketHandler() http.HandlerFunc {
 		    }
 		}
 
-		// Upgrade
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Printf("❌ [WS] Error upgrading: %v", err)
@@ -142,7 +130,6 @@ func WebSocketHandler() http.HandlerFunc {
 		}
 		defer func() {
 			conn.Close()
-			// Limpiar al desconectar
 			subMu.Lock()
 			delete(suscriptores[rutaID], conn)
 			if len(suscriptores[rutaID]) == 0 {
@@ -155,10 +142,9 @@ func WebSocketHandler() http.HandlerFunc {
 				}
 			}
 			subMu.Unlock()
-			log.Printf("🔌 [WS] Usuario %s desconectado de ruta %s", userID, rutaID)
+			log.Printf("[WS] Usuario %s desconectado de ruta %s", userID, rutaID)
 		}()
 
-		// Registrar en memoria
 		subMu.Lock()
 		if suscriptores[rutaID] == nil {
 			suscriptores[rutaID] = make(map[*websocket.Conn]bool)
@@ -171,7 +157,7 @@ func WebSocketHandler() http.HandlerFunc {
 		suscriptoresPorUsuario[userID][rutaID] = true
 		subMu.Unlock()
 
-		log.Printf("✅ [WS] Usuario %s registrado. Total conexiones: %d", userID, len(suscriptores[rutaID]))
+		log.Printf("[WS] Usuario %s registrado. Total conexiones: %d", userID, len(suscriptores[rutaID]))
 
 		if rutaID == "admin-monitor" {
     		go func() {
@@ -185,14 +171,10 @@ func WebSocketHandler() http.HandlerFunc {
 		    }()
 		}
 
-		// Enviar historial inicial
 		if userID != "anonimo" {
 			go enviarHistorialReciente(userID, conn)
 		}
 
-		// ============================================================
-		// BUCLE PRINbraCIPAL: LEER MENSAJES DEL CLIENTE
-		// ============================================================
 		for {
 			_, messageBytes, err := conn.ReadMessage()
 			if err != nil {
@@ -200,23 +182,17 @@ func WebSocketHandler() http.HandlerFunc {
 				break
 			}
 
-			// Parsear mensaje
 			var msg MensajeEntrante
 			if err := json.Unmarshal(messageBytes, &msg); err != nil {
-				log.Printf("⚠️ [WS] Mensaje inválido de %s: %v", userID, err)
+				log.Printf("[WS] Mensaje inválido de %s: %v", userID, err)
 				continue
 			}
-			fmt.Print(msg)
-
 			switch msg.Tipo {
-			// ============================================================
-			// TELEMETRÍA: El conductor envía su ubicación periódicamente
-			// ============================================================
+	
 			case MsgTelemetria:
-		    log.Printf("📍 [TELEMETRÍA] User=%s Lat=%.6f Lon=%.6f Vel=%.0f km/h Ruta=%s",
+		    log.Printf("[TELEMETRÍA] User=%s Lat=%.6f Lon=%.6f Vel=%.0f km/h Ruta=%s",
 		        userID, msg.Lat, msg.Lon, msg.Velocidad, msg.RutaID)
 					
-		    // 1. Actualizar ubicación (omitir si user_id no es UUID)
 		    if userID != "admin" && userID != "anonimo" && database.DB != nil {
 		        _, err := database.DB.Exec(
 		            `INSERT INTO zonas_usuario (user_id, zona_nombre, latitud, longitud, radio_km, activo, fecha_actualizacion)
@@ -226,27 +202,24 @@ func WebSocketHandler() http.HandlerFunc {
 		            userID, msg.Lat, msg.Lon,
 		        )
 		        if err != nil {
-		            log.Printf("⚠️ [TELEMETRÍA] No se actualizó ubicación (user_id no es UUID): %v", err)
+		            log.Printf("[TELEMETRÍA] No se actualizó ubicación (user_id no es UUID): %v", err)
 		        }
 		    }
 
-		    // NUEVO: Registrar en el viaje y verificar desvíos
 		    var nuevoEstado string
 		    var alertaDesvio bool
 		    if viajeSvc != nil && userID != "admin" && userID != "anonimo" {
 		        var err error
 		        nuevoEstado, alertaDesvio, err = viajeSvc.ActualizarUbicacionViaje(userID, msg.Lat, msg.Lon, msg.Velocidad)
 		        if err != nil {
-		            log.Printf("⚠️ [TELEMETRÍA] Error actualizando viaje para %s: %v", userID, err)
+		            log.Printf("[TELEMETRÍA] Error actualizando viaje para %s: %v", userID, err)
 		        }
 		    }
 		
-		    // 2. Buscar reportes cercanos y notificar al conductor
 		    if database.DB != nil {
 		        go verificarProximidadYNotificar(userID, msg.Lat, msg.Lon, msg.RutaID, conn)
 		    }
 		
-		    // 3. Confirmar recepción al emisor
 		    resp := map[string]interface{}{
 		        "tipo":      "telemetria_ack",
 		        "status":    "ok",
@@ -262,10 +235,7 @@ func WebSocketHandler() http.HandlerFunc {
 		        "velocidad_kmh": msg.Velocidad,
 		        "timestamp_cliente": msg.Timestamp,
 		    })
-		
-		    // ============================================================
-		    // NUEVO: Retransmitir telemetría y desvíos a todos los admin-monitor
-		    // ============================================================
+
 		    subMu.RLock()
 		    if adminConns, ok := suscriptores["admin-monitor"]; ok {
 		        telemetriaMsg := map[string]interface{}{
@@ -282,12 +252,11 @@ func WebSocketHandler() http.HandlerFunc {
 		        }
 		        telemetriaBytes, _ := json.Marshal(telemetriaMsg)
 		        for adminConn := range adminConns {
-		            if adminConn != conn { // No reenviar al mismo que envió
+		            if adminConn != conn {
 		                adminConn.WriteMessage(websocket.TextMessage, telemetriaBytes)
 		            }
 		        }
 
-		        // Si hay alerta de desvío, emitir un mensaje de alerta explícito
 		        if alertaDesvio {
 		            alertaMsg := map[string]interface{}{
 		                "tipo":      MsgAlertaDesvio,
@@ -295,7 +264,7 @@ func WebSocketHandler() http.HandlerFunc {
 		                "ruta_id":   msg.RutaID,
 		                "lat":       msg.Lat,
 		                "lon":       msg.Lon,
-		                "mensaje":   fmt.Sprintf("🚨 Conductor %s se ha desviado de su ruta planificada", userID),
+		                "mensaje":   fmt.Sprintf("Conductor %s se ha desviado de su ruta planificada", userID),
 		                "timestamp": time.Now().UTC().Format(time.RFC3339),
 		            }
 		            alertaBytes, _ := json.Marshal(alertaMsg)
@@ -306,11 +275,8 @@ func WebSocketHandler() http.HandlerFunc {
 		    }
 		    subMu.RUnlock()
 
-			// ============================================================
-			// CONFIRMACIÓN: El conductor valida/descarta un reporte
-			// ============================================================
 			case MsgConfirmacion:
-				log.Printf("✅ [CONFIRMACIÓN] User=%s Reporte=%s Vigente=%v",
+				log.Printf("[CONFIRMACIÓN] User=%s Reporte=%s Vigente=%v",
 					userID, msg.ReporteID, msg.Vigente != nil && *msg.Vigente)
 
 				if msg.ReporteID != "" && database.DB != nil {
@@ -345,18 +311,14 @@ func WebSocketHandler() http.HandlerFunc {
 					})
 				}
 
-			// ============================================================
-			// ESTADO DEL CONDUCTOR
-			// ============================================================
 			case MsgEstadoConductor:
 				syncInteraccionMotor("estado_conductor", userID, msg.RutaID, map[string]interface{}{
 					"estado": msg.Estado,
 					"lat":    msg.Lat,
 					"lon":    msg.Lon,
 				})
-				log.Printf("🚦 [ESTADO] User=%s Estado=%s", userID, msg.Estado)
+				log.Printf("[ESTADO] User=%s Estado=%s", userID, msg.Estado)
 
-				// Broadcast a administradores u otros conductores
 				if msg.Estado == "emergencia" {
 					alerta := models.NotificacionAlerta{
 						Tipo:      "emergencia_conductor",
@@ -371,18 +333,14 @@ func WebSocketHandler() http.HandlerFunc {
 					go BroadcastNotificacion(alerta)
 				}
 
-			// ============================================================
-			// SYNC: Reportes pendientes guardados offline
-			// ============================================================
 			case MsgSyncPendientes:
-				log.Printf("📤 [SYNC] User=%s enviando %d reportes pendientes", userID, len(msg.Reportes))
+				log.Printf("[SYNC] User=%s enviando %d reportes pendientes", userID, len(msg.Reportes))
 				subidos := 0
 				for _, repRaw := range msg.Reportes {
 					rep, ok := repRaw.(map[string]interface{})
 					if !ok {
 						continue
 					}
-					// Insertar reporte
 					tipo, _ := rep["tipo"].(string)
 					lat, _ := rep["latitud"].(float64)
 					lon, _ := rep["longitud"].(float64)
@@ -416,15 +374,11 @@ func WebSocketHandler() http.HandlerFunc {
 				conn.WriteJSON(resp)
 
 			default:
-				log.Printf("⚠️ [WS] Tipo de mensaje desconocido: %s", msg.Tipo)
+				log.Printf("[WS] Tipo de mensaje desconocido: %s", msg.Tipo)
 			}
 		}
 	}
 }
-
-// ============================================================
-// VERIFICAR PROXIMIDAD Y NOTIFICAR
-// ============================================================
 
 func verificarProximidadYNotificar(userID string, lat, lon float64, rutaID string, conn *websocket.Conn) {
 	rows, err := database.DB.Query(
@@ -459,7 +413,7 @@ func verificarProximidadYNotificar(userID string, lat, lon float64, rutaID strin
 			"nota_voz":       notaVoz,
 			"confirmaciones": confirmaciones,
 			"timestamp":      timestamp,
-			"mensaje":        fmt.Sprintf("⚠️ %s reportado cerca de tu ubicación", formatearTipoWS(tipo)),
+			"mensaje":        fmt.Sprintf(" %s reportado cerca de tu ubicación", formatearTipoWS(tipo)),
 		}
 		conn.WriteJSON(alerta)
 	}
@@ -477,10 +431,6 @@ func formatearTipoWS(tipo string) string {
 	}
 	return tipo
 }
-
-// ============================================================
-// FUNCIONES EXISTENTES (mantener)
-// ============================================================
 
 func NotificarSuscriptores(rutaID string, data interface{}) {
 	subMu.RLock()
@@ -501,14 +451,13 @@ func NotificarSuscriptores(rutaID string, data interface{}) {
 }
 
 func BroadcastNotificacion(notificacion models.NotificacionAlerta) {
-	log.Printf("📡 [BROADCAST] Broadcast para reporte en (%.6f, %.6f)", notificacion.Latitud, notificacion.Longitud)
+	log.Printf("[BROADCAST] Broadcast para reporte en (%.6f, %.6f)", notificacion.Latitud, notificacion.Longitud)
 
 	db := database.GetDB()
 	if db == nil {
 		return
 	}
 
-	// Buscar usuarios por zona geográfica
 	rows, err := db.Query(
 		`SELECT DISTINCT zu.user_id 
 		 FROM zonas_usuario zu
@@ -526,16 +475,17 @@ func BroadcastNotificacion(notificacion models.NotificacionAlerta) {
 	var userIDs []string
 	for rows.Next() {
 		var uid string
-		rows.Scan(&uid)
+		if err := rows.Scan(&uid); err != nil {
+			log.Printf("[BROADCAST] Error escaneando user_id: %v", err)
+			continue
+		}
 		userIDs = append(userIDs, uid)
 	}
 
-	// Guardar en historial
 	for _, uid := range userIDs {
 		GuardarNotificacion(uid, notificacion)
 	}
 
-	// Notificar en tiempo real
 	subMu.RLock()
 	for uid, rutas := range suscriptoresPorUsuario {
 		esDestinatario := false
@@ -636,7 +586,6 @@ func GetEstadoSuscriptores() map[string]interface{} {
 	return estado
 }
 
-// BroadcastAdminMonitor transmite datos a todos los clientes del canal admin-monitor
 func BroadcastAdminMonitor(data interface{}) {
 	subMu.RLock()
 	defer subMu.RUnlock()

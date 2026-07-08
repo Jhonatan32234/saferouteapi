@@ -8,19 +8,16 @@ import (
 	"saferoute/entities"
 )
 
-// UsuarioRepository define las operaciones de acceso a datos para la tabla `usuarios`.
-// Todas las consultas usan prepared statements con placeholders ($1, $2...).
+
 type UsuarioRepository struct {
 	db            *sql.DB
 	encryptionKey []byte
 }
 
-// NewUsuarioRepository crea una nueva instancia del repositorio.
 func NewUsuarioRepository(db *sql.DB, encryptionKey []byte) *UsuarioRepository {
 	return &UsuarioRepository{db: db, encryptionKey: encryptionKey}
 }
 
-// FindByEmail busca un usuario por email. Aplica AfterLoad para descifrar el teléfono.
 func (r *UsuarioRepository) FindByEmail(email string) (*entities.UsuarioEntity, error) {
 	u := &entities.UsuarioEntity{}
 	err := r.db.QueryRow(
@@ -34,14 +31,12 @@ func (r *UsuarioRepository) FindByEmail(email string) (*entities.UsuarioEntity, 
 	if err != nil {
 		return nil, err
 	}
-	// Decorator/Hook: descifrar campo sensible al cargar desde BD
 	if err := u.AfterLoad(r.encryptionKey); err != nil {
 		return nil, fmt.Errorf("AfterLoad error: %w", err)
 	}
 	return u, nil
 }
 
-// FindByID busca un usuario por su UUID. Aplica AfterLoad para descifrar el teléfono.
 func (r *UsuarioRepository) FindByID(id string) (*entities.UsuarioPerfilConEstadisticas, error) {
     u := &entities.UsuarioPerfilConEstadisticas{}
     var ultimoAcceso sql.NullTime
@@ -79,10 +74,9 @@ func (r *UsuarioRepository) FindByID(id string) (*entities.UsuarioPerfilConEstad
 }
 
 
-// Create inserta un nuevo usuario. Aplica BeforeSave para cifrar el teléfono.
 func (r *UsuarioRepository) Create(u *entities.UsuarioEntity) (string, error) {
     // LOG para debug
-    log.Printf("💾 [REPO] Creando usuario - Email: %s, Teléfono antes de BeforeSave: '%s'", 
+    log.Printf("[REPO] Creando usuario - Email: %s, Teléfono antes de BeforeSave: '%s'", 
         u.Email, u.Telefono)
 
     // Cifrar teléfono antes de guardar
@@ -90,7 +84,7 @@ func (r *UsuarioRepository) Create(u *entities.UsuarioEntity) (string, error) {
         return "", fmt.Errorf("BeforeSave error: %w", err)
     }
 
-    log.Printf("💾 [REPO] Teléfono después de BeforeSave: '%s'", u.Telefono)
+    log.Printf("[REPO] Teléfono después de BeforeSave: '%s'", u.Telefono)
 
     var id string
     err := r.db.QueryRow(
@@ -101,11 +95,11 @@ func (r *UsuarioRepository) Create(u *entities.UsuarioEntity) (string, error) {
     ).Scan(&id)
     
     if err != nil {
-        log.Printf("❌ [REPO] Error INSERT: %v", err)
+        log.Printf("[REPO] Error INSERT: %v", err)
         return "", err
     }
 
-    log.Printf("✅ [REPO] Usuario creado - ID: %s", id)
+    log.Printf("[REPO] Usuario creado - ID: %s", id)
     return id, nil
 }
 func (r *UsuarioRepository) Update(u *entities.UsuarioEntity) error {
@@ -113,7 +107,6 @@ func (r *UsuarioRepository) Update(u *entities.UsuarioEntity) error {
         return fmt.Errorf("BeforeSave error: %w", err)
     }
 
-    // Construir query dinámica de forma segura
     query := "UPDATE usuarios SET updated_at = NOW()"
     args := []interface{}{}
     argCount := 0
@@ -124,7 +117,6 @@ func (r *UsuarioRepository) Update(u *entities.UsuarioEntity) error {
         args = append(args, u.Nombre)
     }
     
-    // Siempre actualizar teléfono (aunque sea vacío, para poder limpiarlo)
     argCount++
     query += fmt.Sprintf(", telefono = NULLIF($%d, '')", argCount)
     args = append(args, u.Telefono)
@@ -139,8 +131,8 @@ func (r *UsuarioRepository) Update(u *entities.UsuarioEntity) error {
     query += fmt.Sprintf(" WHERE id = $%d", argCount)
     args = append(args, u.ID)
 
-    log.Printf("💾 [REPO] Update query: %s", query)
-    log.Printf("💾 [REPO] Update args: %v", args)
+    log.Printf("[REPO] Update query: %s", query)
+    log.Printf("[REPO] Update args: %v", args)
 
     result, err := r.db.Exec(query, args...)
     if err != nil {
@@ -148,12 +140,11 @@ func (r *UsuarioRepository) Update(u *entities.UsuarioEntity) error {
     }
 
     rows, _ := result.RowsAffected()
-    log.Printf("✅ [REPO] Filas actualizadas: %d", rows)
+    log.Printf("[REPO] Filas actualizadas: %d", rows)
     
     return nil
 }
 
-// UpdateLastAccess actualiza solo el campo ultimo_acceso del usuario.
 func (r *UsuarioRepository) UpdateLastAccess(userID string) error {
 	_, err := r.db.Exec(
 		"UPDATE usuarios SET ultimo_acceso = NOW() WHERE id = $1",

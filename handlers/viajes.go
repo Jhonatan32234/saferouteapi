@@ -9,6 +9,7 @@ import (
 
 	"saferoute/middleware"
 	"saferoute/models"
+	"saferoute/pipes"
 	"saferoute/services"
 )
 
@@ -20,16 +21,13 @@ func NewViajesHandler(viajeSvc *services.ViajeService) *ViajesHandler {
 	return &ViajesHandler{viajeSvc: viajeSvc}
 }
 
-// IniciarViajeHandler expone POST /api/viajes/iniciar
 func (h *ViajesHandler) IniciarViajeHandler() http.HandlerFunc {
-	log.Print("Llamando 1")
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := middleware.GetUserID(r)
 		if userID == "" {
 			writeErrorLocal(w, http.StatusUnauthorized, "usuario no autenticado")
 			return
 		}
-		log.Print("Body: ", r.Body)
 
 		var req models.IniciarViajeRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -37,7 +35,10 @@ func (h *ViajesHandler) IniciarViajeHandler() http.HandlerFunc {
 			return
 		}
 
-		log.Print("Req: ", req)
+		if err := pipes.ValidateIniciarViaje(&req); err != nil {
+			writeErrorLocal(w, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		viajeID, err := h.viajeSvc.IniciarViaje(userID, req)
 		if err != nil {
@@ -55,8 +56,6 @@ func (h *ViajesHandler) IniciarViajeHandler() http.HandlerFunc {
 	}
 }
 
-// FinalizarViajeHandler expone POST /api/viajes/finalizar
-// AHORA EMITE evento WebSocket a admin-monitor cuando un viaje finaliza
 func (h *ViajesHandler) FinalizarViajeHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := middleware.GetUserID(r)
@@ -71,12 +70,11 @@ func (h *ViajesHandler) FinalizarViajeHandler() http.HandlerFunc {
 			return
 		}
 
-		if req.ViajeID == "" {
-			writeErrorLocal(w, http.StatusBadRequest, "viaje_id es requerido")
+		if err := pipes.ValidateFinalizarViaje(&req); err != nil {
+			writeErrorLocal(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
-		// Ahora FinalizarViaje retorna el estado final
 		estadoFinal, err := h.viajeSvc.FinalizarViaje(userID, req)
 		if err != nil {
 			log.Printf("❌ [VIAJES] Error finalizando viaje %s para %s: %v", req.ViajeID, userID, err)
@@ -84,9 +82,6 @@ func (h *ViajesHandler) FinalizarViajeHandler() http.HandlerFunc {
 			return
 		}
 
-		// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-		// 🆕 NOTIFICAR AL DASHBOARD DE ADMINISTRADOR EN TIEMPO REAL
-		// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 		var mensaje string
 		var tipoAlerta string
 
@@ -108,10 +103,8 @@ func (h *ViajesHandler) FinalizarViajeHandler() http.HandlerFunc {
 			"timestamp":  time.Now().UTC().Format(time.RFC3339),
 		}
 
-		// Emitir a todos los clientes conectados al canal admin-monitor
 		go BroadcastAdminMonitor(eventoAdmin)
-		log.Printf("📡 [VIAJES] Evento de finalización (%s) emitido para viaje %s del conductor %s", estadoFinal, req.ViajeID, userID)
-		// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+		log.Printf("[VIAJES] Evento de finalización (%s) emitido para viaje %s del conductor %s", estadoFinal, req.ViajeID, userID)
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
@@ -121,7 +114,6 @@ func (h *ViajesHandler) FinalizarViajeHandler() http.HandlerFunc {
 	}
 }
 
-// GetActiveViajeHandler expone GET /api/viajes/activo
 func (h *ViajesHandler) GetActiveViajeHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := middleware.GetUserID(r)
@@ -132,7 +124,7 @@ func (h *ViajesHandler) GetActiveViajeHandler() http.HandlerFunc {
 
 		viaje, err := h.viajeSvc.GetActiveViaje(userID)
 		if err != nil {
-			log.Printf("❌ [VIAJES] Error consultando viaje activo de %s: %v", userID, err)
+			log.Printf("[VIAJES] Error consultando viaje activo de %s: %v", userID, err)
 			writeErrorLocal(w, http.StatusNotFound, "no se encontró un viaje activo")
 			return
 		}
@@ -147,13 +139,11 @@ func (h *ViajesHandler) GetActiveViajeHandler() http.HandlerFunc {
 	}
 }
 
-// GetActiveViajesAdminHandler expone GET /api/admin/viajes/activos
 func (h *ViajesHandler) GetActiveViajesAdminHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// La verificación de rol de administrador se maneja en el middleware de enrutamiento
 		viajes, err := h.viajeSvc.GetActiveViajesAdmin()
 		if err != nil {
-			log.Printf("❌ [ADMIN-VIAJES] Error consultando viajes activos: %v", err)
+			log.Printf("[ADMIN-VIAJES] Error consultando viajes activos: %v", err)
 			writeErrorLocal(w, http.StatusInternalServerError, "error consultando viajes activos")
 			return
 		}

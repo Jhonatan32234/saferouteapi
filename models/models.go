@@ -2,7 +2,6 @@ package models
 
 import "time"
 
-// ===== AUTENTICACIÓN =====
 
 type LoginRequest struct {
 	Email    string `json:"email"`
@@ -14,21 +13,19 @@ type RegisterRequest struct {
     Password string `json:"password"`
     Nombre   string `json:"nombre"`
     Tipo     string `json:"tipo"`
-    Telefono string `json:"telefono"` // Asegúrate que este campo exista
+    Telefono string `json:"telefono"`
 }
 
-// Si no existe, agrégalo al modelo
 
 type AuthResponse struct {
 	Token  string `json:"token"`
 	Nombre string `json:"nombre"`
 	Tipo   string `json:"tipo"`
-	Email  string `json:"email,omitempty"` // ← Agregar este campo si no existe
+	Email  string `json:"email,omitempty"`
 	UserID string `json:"user_id,omitempty"`
 }
 
 
-// ===== PERFIL DE USUARIO =====
 
 type UserProfile struct {
     ID                  string    `json:"id"`
@@ -49,14 +46,12 @@ type UpdateProfileRequest struct {
 	Email    string `json:"email,omitempty"`
 }
 
-// ===== NOTIFICACIONES =====
 
-// models.go
 type NotificacionHistorial struct {
     ID           string     `json:"id"`
     UserID       string     `json:"user_id"`
     Tipo         string     `json:"tipo"`
-    ReporteID    string     `json:"reporte_id,omitempty"` // Puede ser string vacío
+    ReporteID    string     `json:"reporte_id,omitempty"`
     Latitud      float64    `json:"latitud,omitempty"`
     Longitud     float64    `json:"longitud,omitempty"`
     NotaVoz      string     `json:"nota_voz,omitempty"`
@@ -90,7 +85,6 @@ type NotificacionAlerta struct {
 	Mensaje   string    `json:"mensaje"`
 }
 
-// ===== SUSCRIPCIONES =====
 
 type SuscripcionRuta struct {
 	ID                 string    `json:"id"`
@@ -101,7 +95,6 @@ type SuscripcionRuta struct {
 	FechaActualizacion time.Time `json:"fecha_actualizacion"`
 }
 
-// ===== REPORTES =====
 
 type ReporteRequest struct {
 	Tipo     string  `json:"tipo"`
@@ -137,7 +130,6 @@ type ReporteResultado struct {
 	Score   float64         `json:"score"`
 }
 
-// ===== RUTAS =====
 
 type RutasRequest struct {
 	OrigenLat  float64 `json:"origen_lat"`
@@ -154,7 +146,7 @@ type RutaResponse struct {
 	Seguridad          string    `json:"seguridad"`
 	RiesgoCombinado    float64   `json:"riesgo_combinado"`
 	ClustersAtravesados []int    `json:"clusters_atravesados"`
-	Polyline           string    `json:"polyline"` // <--- AGREGAR ESTA LÍNEA
+	Polyline           string    `json:"polyline"`
 }
 
 type RutasResponse struct {
@@ -162,7 +154,6 @@ type RutasResponse struct {
 	Recomendada string         `json:"recomendada"`
 }
 
-// ===== ADMIN =====
 
 type AdminResumenRequest struct {
 	SemanaInicio string `json:"semana_inicio"`
@@ -186,7 +177,6 @@ type TopicoInfo struct {
 	AccionSugerida string   `json:"accion_sugerida"`
 }
 
-// ===== REPORTES CERCANOS =====
 
 type ReportesCercanosRequest struct {
 	Latitud  float64 `json:"lat"`
@@ -206,7 +196,6 @@ type IncidenteCercano struct {
 	DistanciaKm    float64   `json:"distancia_km"`
 }
 
-// ===== ERRORES =====
 
 type ErrorResponse struct {
 	Error   string `json:"error"`
@@ -214,7 +203,6 @@ type ErrorResponse struct {
 	Detalle string `json:"detalle,omitempty"`
 }
 
-// ===== HEALTH =====
 
 type HealthResponse struct {
 	Status    string `json:"status"`
@@ -223,7 +211,6 @@ type HealthResponse struct {
 	Database  string `json:"database"`
 }
 
-// ===== VALIDACIÓN DE TIPOS =====
 
 var TiposValidos = map[string]bool{
 	"accidente":  true,
@@ -236,7 +223,6 @@ var TiposValidos = map[string]bool{
 	"otro":       true,
 }
 
-// ===== SEGUIMIENTO DE VIAJES Y TRAYECTOS =====
 
 type Viaje struct {
 	ID              string     `json:"id"`
@@ -265,7 +251,7 @@ type IniciarViajeRequest struct {
 
 type FinalizarViajeRequest struct {
 	ViajeID  string `json:"viaje_id"`
-	Password string `json:"password,omitempty"` // Contraseña del usuario para verificar cancelación anticipada
+	Password string `json:"password,omitempty"`
 }
 
 type ViajeActivoAdmin struct {

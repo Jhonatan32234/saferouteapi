@@ -10,7 +10,6 @@ import (
 	"saferoute/services"
 )
 
-// GetUserProfileHandler recupera el perfil del usuario delegando al servicio.
 func GetUserProfileHandler(userSvc *services.UserService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := middleware.GetUserID(r)
@@ -32,7 +31,6 @@ func GetUserProfileHandler(userSvc *services.UserService) http.HandlerFunc {
 	}
 }
 
-// UpdateUserProfileHandler actualiza campos del perfil delegando al servicio.
 func UpdateUserProfileHandler(userSvc *services.UserService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := middleware.GetUserID(r)
@@ -41,16 +39,14 @@ func UpdateUserProfileHandler(userSvc *services.UserService) http.HandlerFunc {
 			return
 		}
 
-		// 1. Decodificar DTO de entrada
 		var req models.UpdateProfileRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "datos de entrada inválidos")
 			return
 		}
 
-		// 2. Service: aplicar actualización y persistir
 		if err := userSvc.UpdateProfile(userID, req); err != nil {
-			log.Printf("❌ [PROFILE] Error actualizando usuario %s: %v", userID, err)
+			log.Printf("[PROFILE] Error actualizando usuario %s: %v", userID, err)
 			writeError(w, http.StatusInternalServerError, "error actualizando perfil")
 			return
 		}

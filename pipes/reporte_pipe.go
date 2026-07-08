@@ -7,7 +7,6 @@ import (
 	"saferoute/models"
 )
 
-// tipos de incidentes permitidos (sincronizado con models.TiposValidos)
 var tiposPermitidosPipe = map[string]bool{
 	"accidente":  true,
 	"inundacion": true,
@@ -19,11 +18,8 @@ var tiposPermitidosPipe = map[string]bool{
 	"otro":       true,
 }
 
-// ValidateReporte valida y sanitiza el DTO de creación de reporte.
-// Aplica transformaciones en lugar de solo rechazar: rellena campos opcionales
-// con valores por defecto seguros para reducir errores del cliente.
+
 func ValidateReporte(req *models.ReporteRequest) error {
-	// Normalizar tipo a minúsculasa
 	req.Tipo = strings.ToLower(strings.TrimSpace(req.Tipo))
 
 	if req.Tipo == "" {
@@ -37,7 +33,6 @@ func ValidateReporte(req *models.ReporteRequest) error {
 		return fmt.Errorf("tipo inválido '%s'. Valores permitidos: %s", req.Tipo, strings.Join(tipos, ", "))
 	}
 
-	// Validar coordenadas con rangos geográficos básicos
 	if req.Latitud == 0 && req.Longitud == 0 {
 		return fmt.Errorf("los campos 'latitud' y 'longitud' son requeridos")
 	}
@@ -48,18 +43,15 @@ func ValidateReporte(req *models.ReporteRequest) error {
 		return fmt.Errorf("la longitud debe estar entre -180 y 180")
 	}
 
-	// Valor por defecto para ruta_id opcional
 	if strings.TrimSpace(req.RutaID) == "" {
 		req.RutaID = "sin-ruta"
 	}
 
-	// Sanitizar nota de voz: truncar y limpiar espacios
 	req.NotaVoz = strings.TrimSpace(req.NotaVoz)
 	if len(req.NotaVoz) > 300 {
 		req.NotaVoz = req.NotaVoz[:297] + "..."
 	}
 
-	// Si no hay nota de voz, generar descripción automática por tipo
 	if req.NotaVoz == "" {
 		req.NotaVoz = generarDescripcion(req.Tipo)
 	}
@@ -67,7 +59,6 @@ func ValidateReporte(req *models.ReporteRequest) error {
 	return nil
 }
 
-// generarDescripcion produce una nota de voz automática para cada tipo de incidente.
 func generarDescripcion(tipo string) string {
 	descripciones := map[string]string{
 		"accidente":  "Accidente vial reportado en la vía",

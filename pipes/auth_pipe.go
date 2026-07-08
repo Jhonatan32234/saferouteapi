@@ -7,8 +7,7 @@ import (
 	"saferoute/models"
 )
 
-// ValidateLogin valida que el DTO de login tenga los campos requeridos.
-// Devuelve un error descriptivo si la validación falla.
+
 func ValidateLogin(req *models.LoginRequest) error {
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	if req.Email == "" {
@@ -23,8 +22,7 @@ func ValidateLogin(req *models.LoginRequest) error {
 	return nil
 }
 
-// ValidateRegister valida el DTO de registro con todas las reglas de negocio.
-// Normaliza el email a minúsculas como efecto secundario.
+
 func ValidateRegister(req *models.RegisterRequest) error {
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	req.Nombre = strings.TrimSpace(req.Nombre)

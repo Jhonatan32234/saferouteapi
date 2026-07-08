@@ -2,7 +2,6 @@ package entities
 
 import "time"
 
-// ReporteEntity representa 1:1 la tabla `reportes` en la base de datos.
 type ReporteEntity struct {
 	ID             string
 	UserID         string

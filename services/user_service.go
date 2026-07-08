@@ -6,13 +6,11 @@ import (
 	"saferoute/repository"
 )
 
-// UserService implementa la lógica de negocio para los perfiles de usuario.
 type UserService struct {
 	usuarioRepo   *repository.UsuarioRepository
 	encryptionKey []byte
 }
 
-// NewUserService crea una nueva instancia de UserService.
 func NewUserService(repo *repository.UsuarioRepository, encryptionKey []byte) *UserService {
 	return &UserService{
 		usuarioRepo:   repo,
@@ -20,14 +18,12 @@ func NewUserService(repo *repository.UsuarioRepository, encryptionKey []byte) *U
 	}
 }
 
-// GetProfile recupera el perfil del usuario descifrado.
 func (s *UserService) GetProfile(userID string) (models.UserProfile, error) {
     usuario, err := s.usuarioRepo.FindByID(userID)
     if err != nil {
         return models.UserProfile{}, err
     }
 
-    // Actualizar último acceso en background (no bloquea)
     go func() {
         _ = s.usuarioRepo.UpdateLastAccess(userID)
     }()
@@ -36,7 +32,6 @@ func (s *UserService) GetProfile(userID string) (models.UserProfile, error) {
     return entityToUserProfile(usuario), nil
 }
 
-// UpdateProfile actualiza el perfil del usuario ( BeforeSave cifra el teléfono).
 func (s *UserService) UpdateProfile(userID string, req models.UpdateProfileRequest) error {
 	entity := &entities.UsuarioEntity{
 		ID:       userID,
@@ -48,7 +43,6 @@ func (s *UserService) UpdateProfile(userID string, req models.UpdateProfileReque
 	return s.usuarioRepo.Update(entity)
 }
 
-// entityToUserProfile mapea una UsuarioEntity a un UserProfile DTO de salida.
 func entityToUserProfile(u *entities.UsuarioPerfilConEstadisticas) models.UserProfile {
     profile := models.UserProfile{
         ID:                  u.ID,

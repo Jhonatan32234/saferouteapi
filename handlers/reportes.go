@@ -18,39 +18,33 @@ import (
 	"saferoute/services"
 )
 
-// CreateReporteHandler delega la creación al Service previo paso por el Pipe de validación.
 func CreateReporteHandler(reporteSvc *services.ReporteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// 1. Decodificar DTO de entrada
 		var req models.ReporteRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "datos de entrada inválidos")
 			return
 		}
 
-		// 2. Pipe: Validar y sanitizar el DTO (modifica in-place)
 		if err := pipes.ValidateReporte(&req); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
-		// 3. Obtener identidad del usuario desde el contexto (inyectada por AuthMiddleware)
 		userID := middleware.GetUserID(r)
-		log.Printf("📝 [REPORTE] User=%s Tipo=%s Lat=%.6f Lon=%.6f Ruta=%s",
+		log.Printf("[REPORTE] User=%s Tipo=%s Lat=%.6f Lon=%.6f Ruta=%s",
 			userID, req.Tipo, req.Latitud, req.Longitud, req.RutaID)
 
-		// 4. Service: Ejecutar lógica de negocio y persistir
 		reporte, err := reporteSvc.Create(req, userID)
 		if err != nil {
-			log.Printf("❌ [REPORTE] Error creando: %v", err)
+			log.Printf("[REPORTE] Error creando: %v", err)
 			writeError(w, http.StatusInternalServerError, "error creando el reporte")
 			return
 		}
 
-		log.Printf("✅ [REPORTE] Creado ID=%s", reporte.ID)
+		log.Printf("[REPORTE] Creado ID=%s", reporte.ID)
 		syncReporteCreado(reporte)
 
-		// 5. Notificar en tiempo real a suscriptores de la ruta (background)
 		go func() {
 			BroadcastNotificacion(models.NotificacionAlerta{
 				Tipo:      "nuevo_reporte",
@@ -60,19 +54,17 @@ func CreateReporteHandler(reporteSvc *services.ReporteService) http.HandlerFunc 
 				NotaVoz:   reporte.NotaVoz,
 				RutaID:    reporte.RutaID,
 				Timestamp: reporte.Timestamp,
-				Mensaje:   fmt.Sprintf("⚠️ %s reportado en tu zona", formatearTipo(reporte.Tipo)),
+				Mensaje:   fmt.Sprintf("%s reportado en tu zona", formatearTipo(reporte.Tipo)),
 			})
 		}()
 		go notificarRutasCercanas(reporte)
 
-		// 6. Responder con el DTO de salida
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(reporte)
 	}
 }
 
-// GetReportesHandler delega la consulta de reportes al Service.
 func GetReportesHandler(reporteSvc *services.ReporteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tipo := r.URL.Query().Get("tipo")
@@ -89,7 +81,7 @@ func GetReportesHandler(reporteSvc *services.ReporteService) http.HandlerFunc {
 
 		reportes, err := reporteSvc.GetAll(tipo, vigente, limit, offset)
 		if err != nil {
-			log.Printf("❌ [REPORTES] Error consultando: %v", err)
+			log.Printf("[REPORTES] Error consultando: %v", err)
 			writeError(w, http.StatusInternalServerError, "error consultando reportes")
 			return
 		}
@@ -106,7 +98,6 @@ func GetReportesHandler(reporteSvc *services.ReporteService) http.HandlerFunc {
 	}
 }
 
-// GetReportesCercanosHandler delega la búsqueda geoespacial al Service.
 func GetReportesCercanosHandler(reporteSvc *services.ReporteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		lat, err := strconv.ParseFloat(r.URL.Query().Get("lat"), 64)
@@ -126,7 +117,7 @@ func GetReportesCercanosHandler(reporteSvc *services.ReporteService) http.Handle
 
 		reportes, err := reporteSvc.GetCercanos(lat, lon, radioKm, 50)
 		if err != nil {
-			log.Printf("❌ [CERCANOS] Error: %v", err)
+			log.Printf("[CERCANOS] Error: %v", err)
 			writeError(w, http.StatusInternalServerError, "error consultando reportes")
 			return
 		}
@@ -141,7 +132,6 @@ func GetReportesCercanosHandler(reporteSvc *services.ReporteService) http.Handle
 	}
 }
 
-// GetReporteHandler obtiene un reporte específico por ID usando el Service.
 func GetReporteHandler(reporteSvc *services.ReporteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		reporteID := mux.Vars(r)["id"]
@@ -155,7 +145,6 @@ func GetReporteHandler(reporteSvc *services.ReporteService) http.HandlerFunc {
 	}
 }
 
-// ValidarReporteHandler confirma o desmiente un reporte usando el Service.
 func ValidarReporteHandler(reporteSvc *services.ReporteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		reporteID := mux.Vars(r)["id"]
@@ -182,7 +171,6 @@ func ValidarReporteHandler(reporteSvc *services.ReporteService) http.HandlerFunc
 	}
 }
 
-// GetEstadisticasHandler obtiene estadísticas de reportes (acceso directo a BD, sin lógica de negocio compleja).
 func GetEstadisticasHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var stats struct {
@@ -221,11 +209,6 @@ func GetEstadisticasHandler() http.HandlerFunc {
 	}
 }
 
-// ============================================================
-// FUNCIONES AUXILIARES INTERNAS
-// ============================================================
-
-// formatearTipo devuelve un nombre legible para el tipo de incidente.
 func formatearTipo(tipo string) string {
 	nombres := map[string]string{
 		"accidente":  "Accidente",
@@ -243,33 +226,29 @@ func formatearTipo(tipo string) string {
 	return tipo
 }
 
-// notificarRutasCercanas notifica en WebSocket a rutas cercanas usando placeholders seguros.
 func notificarRutasCercanas(reporte models.ReporteResponse) {
-	log.Printf("🔍 [RUTAS CERCANAS] Buscando para reporte %s (Lat=%.6f, Lon=%.6f)",
+	log.Printf("[RUTAS CERCANAS] Buscando para reporte %s (Lat=%.6f, Lon=%.6f)",
 		reporte.ID, reporte.Latitud, reporte.Longitud)
 
 	if database.DB == nil {
-		log.Printf("❌ [RUTAS CERCANAS] Base de datos no conectada")
+		log.Printf("[RUTAS CERCANAS] Base de datos no conectada")
 		return
 	}
 
-	// Consulta segura con placeholders parametrizados (sin fmt.Sprintf)
-	// Consulta corregida y ordenada de forma secuencial
 	rows, err := database.DB.Query(
 	    `SELECT DISTINCT ruta_id FROM reportes
 	     WHERE vigente = TRUE
 	       AND ruta_id != $1
 	       AND (6371 * acos(cos(radians($2)) * cos(radians(latitud)) *
-	            cos(radians(longitud) - radians($4)) +
-	            sin(radians($3)) * sin(radians(latitud)))) <= 15
+	            cos(radians(longitud) - radians($3)) +
+	            sin(radians($2)) * sin(radians(latitud)))) <= 15
 	     LIMIT 10`,
 	    reporte.RutaID, 
-	    reporte.Latitud,  // Asignado a $2
-	    reporte.Latitud,  // Asignado a $3
-	    reporte.Longitud, // Asignado a $4
+	    reporte.Latitud,  
+	    reporte.Longitud,
 	)
 	if err != nil {
-		log.Printf("❌ [RUTAS CERCANAS] Error SQL: %v", err)
+		log.Printf("[RUTAS CERCANAS] Error SQL: %v", err)
 		return
 	}
 	defer rows.Close()
@@ -282,7 +261,7 @@ func notificarRutasCercanas(reporte models.ReporteResponse) {
 		}
 	}
 
-	log.Printf("✅ [RUTAS CERCANAS] Encontradas %d rutas: %v", len(rutasCercanas), rutasCercanas)
+	log.Printf("[RUTAS CERCANAS] Encontradas %d rutas: %v", len(rutasCercanas), rutasCercanas)
 	if len(rutasCercanas) == 0 {
 		return
 	}
@@ -295,12 +274,12 @@ func notificarRutasCercanas(reporte models.ReporteResponse) {
 		NotaVoz:   reporte.NotaVoz,
 		RutaID:    reporte.RutaID,
 		Timestamp: reporte.Timestamp,
-		Mensaje:   fmt.Sprintf("⚠️ %s reportado cerca de tu ruta", formatearTipo(reporte.Tipo)),
+		Mensaje:   fmt.Sprintf("%s reportado cerca de tu ruta", formatearTipo(reporte.Tipo)),
 	}
 
 	msg, err := json.Marshal(notificacion)
 	if err != nil {
-		log.Printf("❌ [RUTAS CERCANAS] Error marshaling: %v", err)
+		log.Printf("[RUTAS CERCANAS] Error marshaling: %v", err)
 		return
 	}
 
@@ -318,11 +297,10 @@ func notificarRutasCercanas(reporte models.ReporteResponse) {
 			}
 		}
 		subMu.RUnlock()
-		log.Printf("  ✅ [RUTAS CERCANAS] Enviado a %d suscriptores de ruta %s", count, rutaID)
+		log.Printf("  [RUTAS CERCANAS] Enviado a %d suscriptores de ruta %s", count, rutaID)
 	}
 }
 
-// haversine calcula distancia en km entre dos puntos geográficos.
 func haversine(lat1, lon1, lat2, lon2 float64) float64 {
 	const R = 6371.0
 	dLat := (lat2 - lat1) * math.Pi / 180.0

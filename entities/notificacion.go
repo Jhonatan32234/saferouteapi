@@ -2,12 +2,11 @@ package entities
 
 import "time"
 
-// NotificacionEntity representa 1:1 la tabla `notificaciones_historial` en la base de datos.
 type NotificacionEntity struct {
 	ID           string
 	UserID       string
 	Tipo         string
-	ReporteID    *string // Nullable UUID
+	ReporteID    *string
 	Latitud      float64
 	Longitud     float64
 	NotaVoz      string
@@ -15,5 +14,5 @@ type NotificacionEntity struct {
 	Mensaje      string
 	Leida        bool
 	FechaEnvio   time.Time
-	FechaLectura *time.Time // Nullable
+	FechaLectura *time.Time
 }

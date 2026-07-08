@@ -17,7 +17,6 @@ const (
 	TipoKey     contextKey = "tipo"
 )
 
-// AuthMiddleware valida el token y guarda los claims en el contexto
 func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
     return func(next http.Handler) http.Handler {
         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,10 +39,8 @@ func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
                 return
             }
 
-            // Guardar en el contexto
             ctx := r.Context()
             
-            // Extraer user_id
             userID, ok := claims["user_id"].(string)
             if !ok || userID == "" {
                 http.Error(w, "User ID not found in token", http.StatusUnauthorized)
@@ -51,35 +48,29 @@ func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
             }
             ctx = context.WithValue(ctx, UserIDKey, userID)
             
-            // Extraer nombre (opcional)
             if nombre, ok := claims["nombre"].(string); ok {
                 ctx = context.WithValue(ctx, NombreKey, nombre)
             }
             
-            // Extraer tipo (opcional)
             if tipo, ok := claims["tipo"].(string); ok {
                 ctx = context.WithValue(ctx, TipoKey, tipo)
             }
 
-            // Llamar al siguiente handler con el contexto actualizado
             next.ServeHTTP(w, r.WithContext(ctx))
         })
     }
 }
 
-// middleware/auth.go - GetUserID
 func GetUserID(r *http.Request) string {
     if userID, ok := r.Context().Value(UserIDKey).(string); ok {
         return userID
     }
-    // Si no está en el contexto, intentar obtener del header
     if userID := r.Header.Get("X-User-ID"); userID != "" {
         return userID
     }
     return ""
 }
 
-// GetNombre obtiene el nombre del contexto
 func GetNombre(r *http.Request) string {
     if nombre, ok := r.Context().Value(NombreKey).(string); ok {
         return nombre
@@ -87,7 +78,6 @@ func GetNombre(r *http.Request) string {
     return ""
 }
 
-// GetTipo obtiene el tipo del contexto
 func GetTipo(r *http.Request) string {
     if tipo, ok := r.Context().Value(TipoKey).(string); ok {
         return tipo
@@ -95,7 +85,6 @@ func GetTipo(r *http.Request) string {
     return ""
 }
 
-// ValidateToken valida un token JWT
 func ValidateToken(tokenString string, jwtSecret string) (jwt.MapClaims, error) {
     token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
         if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -115,7 +104,6 @@ func ValidateToken(tokenString string, jwtSecret string) (jwt.MapClaims, error) 
     return nil, fmt.Errorf("invalid token")
 }
 
-// GetUserIDFromToken extrae el user_id del token
 func GetUserIDFromToken(tokenString string, jwtSecret string) (string, error) {
     claims, err := ValidateToken(tokenString, jwtSecret)
     if err != nil {

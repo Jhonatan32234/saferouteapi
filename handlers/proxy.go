@@ -7,10 +7,8 @@ import (
 	"time"
 )
 
-// handlers/proxy.go - Versión corregida
 func ProxyHandler(targetURL string) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
-        // Leer el body primero (importante para POST/PUT)
         var bodyReader io.Reader
         if r.Body != nil {
             bodyBytes, _ := io.ReadAll(r.Body)
@@ -24,7 +22,6 @@ func ProxyHandler(targetURL string) http.HandlerFunc {
             return
         }
         
-        // Copiar headers
         for key, values := range r.Header {
             for _, value := range values {
                 req.Header.Add(key, value)

@@ -10,7 +10,6 @@ import (
     "saferoute/middleware"
 )
 
-// SuscribirRutaHandler suscribe al usuario a una ruta específica
 func SuscribirRutaHandler() http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         userID := middleware.GetUserID(r)
@@ -47,12 +46,12 @@ func SuscribirRutaHandler() http.HandlerFunc {
             userID, req.RutaID,
         )
         if err != nil {
-            log.Printf("❌ Error suscribiendo usuario %s a ruta %s: %v", userID, req.RutaID, err)
+            log.Printf("Error suscribiendo usuario %s a ruta %s: %v", userID, req.RutaID, err)
             writeError(w, http.StatusInternalServerError, "error suscribiendo a la ruta")
             return
         }
 
-        log.Printf("✅ Usuario %s suscrito a ruta %s", userID, req.RutaID)
+        log.Printf("Usuario %s suscrito a ruta %s", userID, req.RutaID)
         
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(map[string]string{
@@ -62,7 +61,6 @@ func SuscribirRutaHandler() http.HandlerFunc {
     }
 }
 
-// DesuscribirRutaHandler desuscribe al usuario de una ruta
 func DesuscribirRutaHandler() http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         userID := middleware.GetUserID(r)
@@ -90,12 +88,12 @@ func DesuscribirRutaHandler() http.HandlerFunc {
             userID, rutaID,
         )
         if err != nil {
-            log.Printf("❌ Error desuscribiendo usuario %s de ruta %s: %v", userID, rutaID, err)
+            log.Printf("Error desuscribiendo usuario %s de ruta %s: %v", userID, rutaID, err)
             writeError(w, http.StatusInternalServerError, "error desuscribiendo de la ruta")
             return
         }
 
-        log.Printf("✅ Usuario %s desuscrito de ruta %s", userID, rutaID)
+        log.Printf("Usuario %s desuscrito de ruta %s", userID, rutaID)
         
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(map[string]string{
@@ -105,7 +103,6 @@ func DesuscribirRutaHandler() http.HandlerFunc {
     }
 }
 
-// GetSuscripcionesHandler obtiene todas las suscripciones del usuario
 func GetSuscripcionesHandler() http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         userID := middleware.GetUserID(r)
@@ -127,7 +124,7 @@ func GetSuscripcionesHandler() http.HandlerFunc {
             userID,
         )
         if err != nil {
-            log.Printf("❌ Error obteniendo suscripciones: %v", err)
+            log.Printf("Error obteniendo suscripciones: %v", err)
             writeError(w, http.StatusInternalServerError, "error obteniendo suscripciones")
             return
         }

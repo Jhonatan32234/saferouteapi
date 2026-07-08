@@ -12,7 +12,6 @@ import (
 	"saferoute/services"
 )
 
-// En handlers/admin.go
 
 func RegistrarConductorHandler(authSvc *services.AuthService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +39,6 @@ func RegistrarConductorHandler(authSvc *services.AuthService) http.HandlerFunc {
 			return
 		}
 
-		// Registrar conductor delegando a la capa de servicio
 		id, err := authSvc.RegisterConductor(validateReq.Email, validateReq.Password, validateReq.Nombre, validateReq.Telefono)
 		if err != nil {
 			writeError(w, http.StatusConflict, err.Error())
@@ -59,7 +57,6 @@ func RegistrarConductorHandler(authSvc *services.AuthService) http.HandlerFunc {
 
 func GetAdminResumenHandler(motorNLPURL string, motorLLMURL string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// 1. Obtener tópicos de NLP
 		respNLP, err := http.Get(motorNLPURL + "/nlp/topicos?n_topicos=5")
 		if err != nil {
 			log.Printf("ERROR motor NLP (topicos): %v", err)
@@ -74,7 +71,6 @@ func GetAdminResumenHandler(motorNLPURL string, motorLLMURL string) http.Handler
 			return
 		}
 
-		// Parsear respuesta NLP
 		var nlpResponse struct {
 			Topicos         []map[string]interface{} `json:"topicos"`
 			TotalReportes   int                      `json:"total_reportes"`
@@ -86,7 +82,6 @@ func GetAdminResumenHandler(motorNLPURL string, motorLLMURL string) http.Handler
 			return
 		}
 
-		// 2. Generar resumen con LLM
 		llmReq := map[string]interface{}{
 			"topicos":          nlpResponse.Topicos,
 			"total_reportes":   nlpResponse.TotalReportes,
@@ -116,7 +111,6 @@ func GetAdminResumenHandler(motorNLPURL string, motorLLMURL string) http.Handler
 			resumenLLM = "Resumen no disponible en este momento."
 		}
 
-		// 3. Responder con todo
 		respuesta := map[string]interface{}{
 			"topicos":          nlpResponse.Topicos,
 			"total_reportes":   nlpResponse.TotalReportes,

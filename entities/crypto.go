@@ -6,13 +6,28 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 )
 
-// encrypt cifra un texto plano usando AES-GCM y devuelve el resultado en base64.
-func encrypt(plaintext string, key []byte) (string, error) {
+func DecodeEncryptionKey(b64Key string) ([]byte, error) {
+	key, err := base64.StdEncoding.DecodeString(b64Key)
+	if err != nil {
+		return nil, fmt.Errorf("ENCRYPTION_KEY no es base64 válido: %w", err)
+	}
+	if len(key) != 32 {
+		return nil, fmt.Errorf("ENCRYPTION_KEY debe decodificar a 32 bytes (AES-256), obtenidos: %d", len(key))
+	}
+	return key, nil
+}
+
+func Encrypt(plaintext string, key []byte) (string, error) {
 	if plaintext == "" {
 		return "", nil
+	}
+
+	if len(key) != 32 {
+		return "", fmt.Errorf("la clave AES debe ser de 32 bytes, recibidos: %d", len(key))
 	}
 
 	block, err := aes.NewCipher(key)
@@ -37,13 +52,15 @@ func encrypt(plaintext string, key []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-// decrypt descifra un texto cifrado en base64 usando AES-GCM.
-func decrypt(encodedCiphertext string, key []byte) (string, error) {
+func Decrypt(encodedCiphertext string, key []byte) (string, error) {
 	if encodedCiphertext == "" {
 		return "", nil
 	}
 
-	// Decodificar de base64
+	if len(key) != 32 {
+		return "", fmt.Errorf("la clave AES debe ser de 32 bytes, recibidos: %d", len(key))
+	}
+
 	ciphertext, err := base64.StdEncoding.DecodeString(encodedCiphertext)
 	if err != nil {
 		return "", err
@@ -64,10 +81,8 @@ func decrypt(encodedCiphertext string, key []byte) (string, error) {
 		return "", errors.New("ciphertext demasiado corto")
 	}
 
-	// Extraer nonce y ciphertext
 	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
 
-	// Descifrar
 	plaintext, err := aesGCM.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
 		return "", err

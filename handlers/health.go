@@ -7,12 +7,10 @@ import (
 	"time"
 )
 
-// HealthHandler retorna el estado de salud del sistema
 func HealthHandler() http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "application/json")
 
-        // Si es HEAD, solo responde con 200 y headers
         if r.Method == http.MethodHead {
             w.WriteHeader(http.StatusOK)
             return

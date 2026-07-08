@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 
 	"saferoute/database"
 )
@@ -58,7 +59,6 @@ func GetUsuariosInternoHandler() http.HandlerFunc {
 				continue
 			}
 
-			// Calcular métricas derivadas
 			precision := 0.0
 			if totalReportes > 0 {
 				precision = float64(reportesConfirmados) / float64(totalReportes) * 100
@@ -88,7 +88,7 @@ func GetUsuariosInternoHandler() http.HandlerFunc {
 				"conductor_id":          id,
 				"nombre":                nombre,
 				"tipo":                  tipo,
-				"tipo_conductor":        mapearTipoConductor(nombre, tipo),
+				"tipo_conductor":        mapearTipoConductor(nombre),
 				"total_rutas":           totalRutas,
 				"rutas_peligrosas_pct":  round(rutasPeligrosasPct, 1),
 				"total_reportes":        totalReportes,
@@ -112,42 +112,21 @@ func GetUsuariosInternoHandler() http.HandlerFunc {
 		})
 	}
 }
-func mapearTipoConductor(nombre, tipo string) string {
-	nombreLower := nombre
-	if len(nombre) > 15 {
-		nombreLower = nombre[:15]
-	}
-	
-	// Heurística simple basada en el nombre
-	if contiene(nombreLower, "taxi") || contiene(nombreLower, "taxista") {
+
+func mapearTipoConductor(nombre string) string {
+	nombreLower := strings.ToLower(nombre)
+
+	if strings.Contains(nombreLower, "taxi") || strings.Contains(nombreLower, "taxista") {
 		return "taxista"
 	}
-	if contiene(nombreLower, "comer") || contiene(nombreLower, "carga") {
+	if strings.Contains(nombreLower, "comer") || strings.Contains(nombreLower, "carga") {
 		return "comerciante"
 	}
-	if contiene(nombreLower, "proteccion") || contiene(nombreLower, "civil") || contiene(nombreLower, "emergencia") {
+	if strings.Contains(nombreLower, "proteccion") || strings.Contains(nombreLower, "civil") || strings.Contains(nombreLower, "emergencia") {
 		return "proteccion_civil"
 	}
-	
+
 	return "particular"
-}
-
-func contiene(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && 
-		(s == substr || 
-		 (len(s) >= len(substr) && 
-		  (s[:len(substr)] == substr || 
-		   s[len(s)-len(substr):] == substr ||
-		   containsSubstring(s, substr))))
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func round(val float64, precision int) float64 {

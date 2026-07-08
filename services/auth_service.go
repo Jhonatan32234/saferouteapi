@@ -14,14 +14,12 @@ import (
 	"saferoute/repository"
 )
 
-// AuthService contiene la lógica de negocio de autenticación.
 type AuthService struct {
 	usuarioRepo   *repository.UsuarioRepository
 	encryptionKey []byte
 	jwtSecret     string
 }
 
-// NewAuthService crea una nueva instancia del servicio de autenticación.
 func NewAuthService(repo *repository.UsuarioRepository, encryptionKey []byte, jwtSecret string) *AuthService {
 	return &AuthService{
 		usuarioRepo:   repo,
@@ -56,7 +54,6 @@ func (s *AuthService) Login(req models.LoginRequest) (models.AuthResponse, error
 }
 
 func (s *AuthService) Register(req models.RegisterRequest) (models.AuthResponse, error) {
-	// Normalizar datos
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	nombre := strings.TrimSpace(req.Nombre)
 	telefono := strings.TrimSpace(req.Telefono)
@@ -65,22 +62,19 @@ func (s *AuthService) Register(req models.RegisterRequest) (models.AuthResponse,
 		return models.AuthResponse{}, fmt.Errorf("email, password y nombre son requeridos")
 	}
 
-	// Verificar si el email ya existe
 	existente, _ := s.usuarioRepo.FindByEmail(email)
 	if existente != nil {
 		return models.AuthResponse{}, fmt.Errorf("el email ya está registrado")
 	}
 
-	// Hashear contraseña
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return models.AuthResponse{}, fmt.Errorf("error procesando contraseña")
 	}
 
-	// El registro público solo crea conductores
 	tipo := "conductor"
 
-	log.Printf("📝 [AUTH] Registrando usuario - Email: %s, Teléfono: '%s'", email, telefono)
+	log.Printf("[AUTH] Registrando usuario - Email: %s, Teléfono: '%s'", email, telefono)
 
 	entity := &entities.UsuarioEntity{
 		Email:        email,
@@ -90,16 +84,14 @@ func (s *AuthService) Register(req models.RegisterRequest) (models.AuthResponse,
 		Telefono:     telefono,
 	}
 
-	// Guardar en BD
 	userID, err := s.usuarioRepo.Create(entity)
 	if err != nil {
-		log.Printf("❌ [AUTH] Error creando usuario: %v", err)
+		log.Printf("[AUTH] Error creando usuario: %v", err)
 		return models.AuthResponse{}, fmt.Errorf("error al crear usuario")
 	}
 
-	log.Printf("✅ [AUTH] Usuario creado - ID: %s", userID)
+	log.Printf("[AUTH] Usuario creado - ID: %s", userID)
 
-	// Generar token JWT
 	token, err := generateJWT(userID, email, tipo, s.jwtSecret)
 	if err != nil {
 		return models.AuthResponse{}, fmt.Errorf("error generando token")
@@ -114,13 +106,12 @@ func (s *AuthService) Register(req models.RegisterRequest) (models.AuthResponse,
 	}, nil
 }
 
-// generateJWT crea un token JWT firmado
 func generateJWT(userID, email, tipo, jwtSecret string) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id": userID,
 		"email":   email,
 		"tipo":    tipo,
-		"exp":     time.Now().Add(72 * time.Hour).Unix(), // 3 días
+		"exp":     time.Now().Add(72 * time.Hour).Unix(),
 		"iat":     time.Now().Unix(),
 	}
 
@@ -133,7 +124,6 @@ func generateJWT(userID, email, tipo, jwtSecret string) (string, error) {
 	return tokenString, nil
 }
 
-// RegisterConductor crea un conductor con teléfono, invocado solo por admins.
 func (s *AuthService) RegisterConductor(email, password, nombre, telefono string) (string, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	nombre = strings.TrimSpace(nombre)
@@ -153,7 +143,7 @@ func (s *AuthService) RegisterConductor(email, password, nombre, telefono string
 		PasswordHash: string(hashedPassword),
 		Nombre:       nombre,
 		Tipo:         "conductor",
-		Telefono:     telefono, // BeforeSave lo cifrará en el repositorio
+		Telefono:     telefono,
 	}
 
 	id, err := s.usuarioRepo.Create(u)

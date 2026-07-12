@@ -98,10 +98,22 @@ CREATE TABLE IF NOT EXISTS notificaciones_historial (
     fecha_lectura TIMESTAMP WITH TIME ZONE
 );
 
--- 9. Crear índices para búsquedas eficientes
+-- 9. Tabla para historial de destinos recientes del conductor
+CREATE TABLE IF NOT EXISTS historial_destinos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    nombre VARCHAR(500) NOT NULL,
+    latitud DOUBLE PRECISION NOT NULL,
+    longitud DOUBLE PRECISION NOT NULL,
+    fecha_creacion TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 10. Crear índices para búsquedas eficientes
 CREATE INDEX IF NOT EXISTS idx_viajes_estado ON viajes(estado);
 CREATE INDEX IF NOT EXISTS idx_viajes_user_id ON viajes(user_id);
 CREATE INDEX IF NOT EXISTS idx_historial_viaje_id ON historial_viaje_coordenadas(viaje_id);
 CREATE INDEX IF NOT EXISTS idx_viajes_geom ON viajes USING gist(geom_ruta);
 CREATE INDEX IF NOT EXISTS idx_reportes_vigente ON reportes(vigente);
 CREATE INDEX IF NOT EXISTS idx_notificaciones_usuario_leida ON notificaciones_historial(user_id, leida);
+CREATE INDEX IF NOT EXISTS idx_historial_destinos_user_id ON historial_destinos(user_id);
+CREATE INDEX IF NOT EXISTS idx_historial_destinos_fecha ON historial_destinos(user_id, fecha_creacion DESC);

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"time"
 
 	"saferoute/database"
@@ -47,7 +48,7 @@ func NotificarConductorHandler() http.HandlerFunc {
 
 		mensaje := req.Mensaje
 		if mensaje == "" {
-			mensaje = fmt.Sprintf("⚠️ Alerta: %s reportado a %.1f km de tu ubicación. Verifica la ruta.",
+			mensaje = fmt.Sprintf("Alerta: %s reportado a %.1f km de tu ubicación. Verifica la ruta.",
 				formatearTipoIncidente(req.TipoIncidente), req.DistanciaKm)
 		}
 
@@ -94,7 +95,7 @@ func enviarAlertaConductor(userID string, data map[string]interface{}) bool {
 
 	msgBytes, err := json.Marshal(data)
 	if err != nil {
-		log.Printf("⚠️ [NotificarConductor] Error serializando: %v", err)
+		log.Printf("[NotificarConductor] Error serializando: %v", err)
 		return false
 	}
 
@@ -110,7 +111,7 @@ func enviarAlertaConductor(userID string, data map[string]interface{}) bool {
 		}
 		for conn := range conns {
 			if err := conn.WriteMessage(1, msgBytes); err == nil {
-				log.Printf("✅ [NotificarConductor] Alerta enviada a %s en ruta %s", userID, rutaID)
+				log.Printf("[NotificarConductor] Alerta enviada a %s en ruta %s", userID, rutaID)
 				return true
 			}
 		}
@@ -119,15 +120,30 @@ func enviarAlertaConductor(userID string, data map[string]interface{}) bool {
 	return false
 }
 
+var uuidRegex = regexp.MustCompile(`^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$`)
+
+func esUUID(s string) bool {
+	return uuidRegex.MatchString(s)
+}
+
 func guardarNotificacionAdmin(userID, reporteID string, lat, lon float64, mensaje string) {
+	// Si reporteID no es un UUID válido, usar NULL para evitar error de PostgreSQL
+	var reporteIDParam interface{}
+	if esUUID(reporteID) {
+		reporteIDParam = reporteID
+	} else {
+		log.Printf("[NotificarConductor] reporte_id '%s' no es UUID válido, se guardará como NULL", reporteID)
+		reporteIDParam = nil
+	}
+
 	_, err := database.DB.Exec(`
 		INSERT INTO notificaciones_historial 
 		(user_id, tipo, reporte_id, latitud, longitud, ruta_id, mensaje, fecha_envio)
 		VALUES ($1, 'alerta_incidente_admin', $2, $3, $4, 'admin-directo', $5, NOW())`,
-		userID, reporteID, lat, lon, mensaje,
+		userID, reporteIDParam, lat, lon, mensaje,
 	)
 	if err != nil {
-		log.Printf("⚠️ [NotificarConductor] Error guardando en BD: %v", err)
+		log.Printf("[NotificarConductor] Error guardando en BD: %v", err)
 	}
 }
 

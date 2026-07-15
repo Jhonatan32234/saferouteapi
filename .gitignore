@@ -1,3 +1,4 @@
 *.env
 *.sh
 *.json
+!cmd/api/static/*.json

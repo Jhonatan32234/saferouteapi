@@ -1,10 +1,11 @@
 package main
 
 import (
+	"crypto/ed25519"
 	"database/sql"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -12,72 +13,119 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/rs/cors"
+	"golang.org/x/time/rate"
 
-	"saferoute/config"
-	"saferoute/database"
-	"saferoute/entities"
-	"saferoute/handlers"
-	"saferoute/middleware"
-	"saferoute/repository"
-	"saferoute/services"
+	"saferoute/internal/auth"
+	"saferoute/internal/config"
+	"saferoute/internal/database"
+	"saferoute/internal/middleware"
+	"saferoute/internal/motor"
+	"saferoute/internal/reporte"
+	"saferoute/internal/security"
+	"saferoute/internal/user"
+	"saferoute/internal/viaje"
 )
 
 //go:embed static
 var staticFiles embed.FS
 
 func main() {
-
+	// ── Configuración ──────────────────────────────────────────────────────────
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatal("Error cargando configuración:", err)
 	}
 
-	encryptionKey, err := entities.DecodeEncryptionKey(cfg.EncryptionKey)
+	encryptionKey, err := security.DecodeEncryptionKey(cfg.EncryptionKey)
 	if err != nil {
 		log.Fatalf("Error con ENCRYPTION_KEY: %v. Asegúrate de que sea base64 de 32 bytes.", err)
 	}
-	log.Println("Clave de cifrado AES-256 cargada correctamente")
+	log.Println("✅ Clave de cifrado AES-256 cargada correctamente")
 
+	// Decodificar claves asimétricas Ed25519
+	jwtPublicKeyBytes, err := base64.StdEncoding.DecodeString(cfg.JWTPublicKey)
+	if err != nil {
+		log.Fatalf("Error decodificando JWT_PUBLIC_KEY: %v. Debe ser base64 de 32 bytes.", err)
+	}
+	jwtPublicKey := ed25519.PublicKey(jwtPublicKeyBytes)
+
+	var servicePrivateKey ed25519.PrivateKey
+	if cfg.ServicePrivateKey != "" {
+		servicePrivateKeyBytes, err := base64.StdEncoding.DecodeString(cfg.ServicePrivateKey)
+		if err != nil {
+			log.Fatalf("Error decodificando SERVICE_PRIVATE_KEY: %v. Debe ser base64 de 64 bytes.", err)
+		}
+		servicePrivateKey = ed25519.PrivateKey(servicePrivateKeyBytes)
+	}
+
+	log.Println("✅ Claves asimétricas Ed25519 cargadas correctamente")
+
+	// ── Base de datos ──────────────────────────────────────────────────────────
 	if err := database.Connect(cfg.DatabaseURL); err != nil {
 		log.Fatal("Error conectando a base de datos:", err)
 	}
 	defer database.Close()
+	db := database.DB
 
-	usuarioRepo := repository.NewUsuarioRepository(database.DB, encryptionKey)
-	reporteRepo := repository.NewReporteRepository(database.DB)
-	viajeRepo := repository.NewViajeRepository(database.DB)
+	// ── Repositorios ───────────────────────────────────────────────────────────
+	userRepo := user.NewRepository(db, encryptionKey)
+	reporteRepo := reporte.NewRepository(db)
+	viajeRepo := viaje.NewRepository(db)
 
-	authSvc := services.NewAuthService(usuarioRepo, encryptionKey, cfg.JWTSecret)
-	reporteSvc := services.NewReporteService(reporteRepo)
-	userSvc := services.NewUserService(usuarioRepo, encryptionKey)
-	motorSyncSvc := services.NewMotorSyncService(cfg.MotorNLPURL, cfg.MotorPrediccionesURL, cfg.InternalAPIKey)
-	viajeSvc := services.NewViajeService(viajeRepo, usuarioRepo)
+	// ── Servicios ──────────────────────────────────────────────────────────────
+	motorSvc := motor.NewService(cfg.MotorNLPURL, cfg.MotorPrediccionesURL, cfg.InternalAPIKey)
 
-	StartSignalTimeoutMonitor(database.DB, 1*time.Minute, 5*time.Minute)
+	// Motor adapters (implementan interfaces locales con el motorSvc genérico)
+	reporteMotorSvc := &reporteMotorAdapter{svc: motorSvc}
 
-	limiter := middleware.NewIPRateLimiter(5, 10)
+	userSvc := user.NewService(userRepo)
+	authSvc := auth.NewAuthService(cfg.AuthServiceURL, cfg.InternalAPIKey, servicePrivateKey)
+	reporteSvc := reporte.NewService(reporteRepo, userRepo, reporteMotorSvc)
+	viajeSvc := viaje.NewService(viajeRepo, userRepo)
 
+	// ── Monitor de heartbeat ───────────────────────────────────────────────────
+	viaje.StartSignalTimeoutMonitor(db, 1*time.Minute, 5*time.Minute)
+
+	// ── WebSocket manager ──────────────────────────────────────────────────────
+	wsAdapter := &wsMotorAdapter{svc: motorSvc}
+	wsMgr := viaje.NewWebSocketManager(db, viajeSvc, wsAdapter, jwtPublicKey)
+
+	// ── Handlers ───────────────────────────────────────────────────────────────
+	authHandler := auth.NewHandler(authSvc, cfg.JWTSecret)
+	userHandler := user.NewHandler(userSvc)
+	reporteHandler := reporte.NewHandler(reporteSvc, &wsNotifierAdapter{mgr: wsMgr})
+	adminReporteHandler := reporte.NewAdminHandler(cfg.MotorNLPURL, cfg.MotorLLMURL)
+	viajeHandler := viaje.NewHandler(viajeSvc)
+	motorHandler := motor.NewHandler(cfg.MotorRutasURL)
+
+	// ── Rate limiter ───────────────────────────────────────────────────────────
+	limiter := middleware.NewIPRateLimiter(
+		rate.Limit(cfg.RateLimit.RequestsPerSecond),
+		cfg.RateLimit.Burst,
+	)
+
+	// ── Router ─────────────────────────────────────────────────────────────────
 	r := mux.NewRouter()
 
-	handlers.SetJWTSecret(cfg.JWTSecret)
-	handlers.SetMotorSyncService(motorSyncSvc)
-	handlers.SetViajeService(viajeSvc)
-	r.HandleFunc("/ws/alertas/{ruta_id}", handlers.WebSocketHandler())
+	// WebSocket (sin auth middleware, maneja su propio token)
+	r.HandleFunc("/ws/alertas/{ruta_id}", wsMgr.WebSocketHandler())
 
+	// Sub-router principal con middlewares
 	httpRouter := r.PathPrefix("/").Subrouter()
 	httpRouter.Use(middleware.SecurityHeaders)
 	httpRouter.Use(middleware.LoggingMiddleware)
 	httpRouter.Use(middleware.RateLimitMiddleware(limiter))
 
+	// ── Rutas internas (API Key) ────────────────────────────────────────────────
 	interno := httpRouter.PathPrefix("/api/internal").Subrouter()
 	interno.Use(middleware.InternalAPIKeyMiddleware)
+	interno.HandleFunc("/reportes", reporteHandler.GetReportesHandler()).Methods("GET")
+	interno.HandleFunc("/reportes/cercanos", reporteHandler.GetReportesCercanosHandler()).Methods("GET")
+	interno.HandleFunc("/reportes/estadisticas", reporteHandler.GetEstadisticasHandler()).Methods("GET")
+	interno.HandleFunc("/reportes/{id}", reporteHandler.GetReporteHandler()).Methods("GET")
+	interno.HandleFunc("/usuarios", userHandler.GetUsuariosInternoHandler()).Methods("GET")
 
-	interno.HandleFunc("/reportes", handlers.GetReportesHandler(reporteSvc)).Methods("GET")
-	interno.HandleFunc("/reportes/cercanos", handlers.GetReportesCercanosHandler(reporteSvc)).Methods("GET")
-	interno.HandleFunc("/reportes/estadisticas", handlers.GetEstadisticasHandler()).Methods("GET")
-	interno.HandleFunc("/reportes/{id}", handlers.GetReporteHandler(reporteSvc)).Methods("GET")
-	interno.HandleFunc("/usuarios", handlers.GetUsuariosInternoHandler()).Methods("GET")
-
+	// ── Documentación estática ─────────────────────────────────────────────────
 	docsFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
 		log.Printf("Error cargando documentación embebida: %v", err)
@@ -85,142 +133,146 @@ func main() {
 		httpRouter.PathPrefix("/docs/").Handler(http.StripPrefix("/docs/", http.FileServer(http.FS(docsFS))))
 	}
 
-	httpRouter.HandleFunc("/api/auth/login", handlers.LoginHandler(authSvc, cfg.JWTSecret)).Methods("POST")
-	httpRouter.HandleFunc("/api/auth/register", handlers.RegisterHandler(authSvc)).Methods("POST")
-	httpRouter.HandleFunc("/api/health", handlers.HealthHandler()).Methods("GET", "HEAD")
-	httpRouter.HandleFunc("/api/clusters", handlers.ProxyHandler(cfg.MotorRutasURL+"/clusters")).Methods("GET")
+	// ── Rutas públicas ─────────────────────────────────────────────────────────
+	httpRouter.HandleFunc("/api/auth/login", authHandler.LoginHandler()).Methods("POST")
+	httpRouter.HandleFunc("/api/auth/register", authHandler.RegisterHandler()).Methods("POST")
+	httpRouter.HandleFunc("/api/health", healthHandler(db)).Methods("GET", "HEAD")
+	httpRouter.HandleFunc("/api/clusters", motor.ProxyHandler(cfg.MotorRutasURL+"/clusters")).Methods("GET")
 
+	// ── Rutas autenticadas ─────────────────────────────────────────────────────
 	api := httpRouter.PathPrefix("/api").Subrouter()
-	api.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+	api.Use(middleware.AuthMiddleware(jwtPublicKey))
 
-	viajesHandler := handlers.NewViajesHandler(viajeSvc)
-	api.HandleFunc("/viajes/iniciar", viajesHandler.IniciarViajeHandler()).Methods("POST")
-	api.HandleFunc("/viajes/finalizar", viajesHandler.FinalizarViajeHandler()).Methods("POST")
-	api.HandleFunc("/viajes/activo", viajesHandler.GetActiveViajeHandler()).Methods("GET")
+	// Viajes
+	api.HandleFunc("/viajes/iniciar", viajeHandler.IniciarViajeHandler()).Methods("POST")
+	api.HandleFunc("/viajes/finalizar", viajeHandler.FinalizarViajeHandler()).Methods("POST")
+	api.HandleFunc("/viajes/activo", viajeHandler.GetActiveViajeHandler()).Methods("GET")
 
-	api.HandleFunc("/user/profile", handlers.GetUserProfileHandler(userSvc)).Methods("GET")
-	api.HandleFunc("/user/profile", handlers.UpdateUserProfileHandler(userSvc)).Methods("PUT")
-	api.HandleFunc("/user/notificaciones", handlers.GetHistorialNotificacionesHandler()).Methods("GET")
-	api.HandleFunc("/user/notificaciones/marcar", handlers.MarcarNotificacionHandler()).Methods("PUT")
-	api.HandleFunc("/user/notificaciones/marcar-todas", handlers.MarcarTodasNotificacionesHandler()).Methods("PUT")
-	api.HandleFunc("/user/notificaciones/sincronizar", handlers.SincronizarNotificacionesHandler()).Methods("POST")
-	api.HandleFunc("/user/suscribir", handlers.SuscribirRutaHandler()).Methods("POST")
-	api.HandleFunc("/user/desuscribir", handlers.DesuscribirRutaHandler()).Methods("DELETE")
-	api.HandleFunc("/user/suscripciones", handlers.GetSuscripcionesHandler()).Methods("GET")
-	api.HandleFunc("/user/zonas", handlers.ActualizarZonasUsuarioHandler()).Methods("POST")
-	api.HandleFunc("/user/zonas", handlers.ObtenerZonasUsuarioHandler()).Methods("GET")
-	api.HandleFunc("/user/destinos", handlers.GuardarDestinoRecenteHandler()).Methods("POST")
-	api.HandleFunc("/user/destinos", handlers.GetDestinosRecientesHandler()).Methods("GET")
-	api.HandleFunc("/user/destinos", handlers.EliminarDestinoRecenteHandler()).Methods("DELETE")
-	api.HandleFunc("/reportes", handlers.CreateReporteHandler(reporteSvc)).Methods("POST")
-	api.HandleFunc("/reportes", handlers.GetReportesHandler(reporteSvc)).Methods("GET")
-	api.HandleFunc("/reportes/cercanos", handlers.GetReportesCercanosHandler(reporteSvc)).Methods("GET")
-	api.HandleFunc("/reportes/estadisticas", handlers.GetEstadisticasHandler()).Methods("GET")
-	api.HandleFunc("/reportes/{id}", handlers.GetReporteHandler(reporteSvc)).Methods("GET")
-	api.HandleFunc("/reportes/{id}/validar", handlers.ValidarReporteHandler(reporteSvc)).Methods("PUT")
-	api.HandleFunc("/rutas", handlers.GetRutasHandler(cfg.MotorRutasURL)).Methods("POST")
-	api.HandleFunc("/predicciones/zonas", handlers.ProxyHandler(cfg.MotorPrediccionesURL+"/predicciones/zonas")).Methods("POST")
-	api.HandleFunc("/predicciones/perfil", handlers.ProxyHandler(cfg.MotorPrediccionesURL+"/predicciones/perfil")).Methods("POST")
+	// Usuario
+	api.HandleFunc("/user/profile", userHandler.GetUserProfileHandler()).Methods("GET")
+	api.HandleFunc("/user/profile", userHandler.UpdateUserProfileHandler()).Methods("PUT")
+	api.HandleFunc("/user/notificaciones", userHandler.GetHistorialNotificacionesHandler()).Methods("GET")
+	api.HandleFunc("/user/notificaciones/marcar", userHandler.MarcarNotificacionHandler()).Methods("PUT")
+	api.HandleFunc("/user/notificaciones/marcar-todas", userHandler.MarcarTodasNotificacionesHandler()).Methods("PUT")
+	api.HandleFunc("/user/notificaciones/sincronizar", userHandler.SincronizarNotificacionesHandler()).Methods("POST")
+	api.HandleFunc("/user/suscribir", userHandler.SuscribirRutaHandler()).Methods("POST")
+	api.HandleFunc("/user/desuscribir", userHandler.DesuscribirRutaHandler()).Methods("DELETE")
+	api.HandleFunc("/user/suscripciones", userHandler.GetSuscripcionesHandler()).Methods("GET")
+	api.HandleFunc("/user/zonas", userHandler.ActualizarZonasUsuarioHandler()).Methods("POST")
+	api.HandleFunc("/user/zonas", userHandler.ObtenerZonasUsuarioHandler()).Methods("GET")
+	api.HandleFunc("/user/destinos", userHandler.GuardarDestinoRecenteHandler()).Methods("POST")
+	api.HandleFunc("/user/destinos", userHandler.GetDestinosRecientesHandler()).Methods("GET")
+	api.HandleFunc("/user/destinos", userHandler.EliminarDestinoRecenteHandler()).Methods("DELETE")
 
+	// Reportes
+	api.HandleFunc("/reportes", reporteHandler.CreateReporteHandler()).Methods("POST")
+	api.HandleFunc("/reportes", reporteHandler.GetReportesHandler()).Methods("GET")
+	api.HandleFunc("/reportes/cercanos", reporteHandler.GetReportesCercanosHandler()).Methods("GET")
+	api.HandleFunc("/reportes/estadisticas", reporteHandler.GetEstadisticasHandler()).Methods("GET")
+	api.HandleFunc("/reportes/{id}", reporteHandler.GetReporteHandler()).Methods("GET")
+	api.HandleFunc("/reportes/{id}/validar", reporteHandler.ValidarReporteHandler()).Methods("PUT")
+
+	// Motor de rutas y predicciones
+	api.HandleFunc("/rutas", motorHandler.GetRutasHandler()).Methods("POST")
+	api.HandleFunc("/predicciones/zonas", motor.ProxyHandler(cfg.MotorPrediccionesURL+"/predicciones/zonas")).Methods("POST")
+	api.HandleFunc("/predicciones/perfil", motor.ProxyHandler(cfg.MotorPrediccionesURL+"/predicciones/perfil")).Methods("POST")
+
+	// ── Rutas de administrador ─────────────────────────────────────────────────
 	apiAdmin := api.PathPrefix("/admin").Subrouter()
-	apiAdmin.Use(middleware.RoleMiddleware(cfg.JWTSecret, "admin"))
+	apiAdmin.Use(middleware.RoleMiddleware(jwtPublicKey, "admin"))
+	apiAdmin.HandleFunc("/resumen", adminReporteHandler.GetAdminResumenHandler()).Methods("GET")
+	apiAdmin.HandleFunc("/buscar", adminReporteHandler.BuscarReportesHandler()).Methods("POST")
+	apiAdmin.HandleFunc("/registrar-conductor", authHandler.RegistrarConductorHandler()).Methods("POST")
+	apiAdmin.HandleFunc("/viajes/activos", viajeHandler.GetActiveViajesAdminHandler()).Methods("GET")
+	apiAdmin.HandleFunc("/notificar-conductor", wsMgr.NotificarConductorHandler()).Methods("POST")
 
-	apiAdmin.HandleFunc("/resumen", handlers.GetAdminResumenHandler(cfg.MotorNLPURL, cfg.MotorLLMURL)).Methods("GET")
-	apiAdmin.HandleFunc("/buscar", handlers.BuscarReportesHandler(cfg.MotorNLPURL)).Methods("POST")
-	apiAdmin.HandleFunc("/registrar-conductor", handlers.RegistrarConductorHandler(authSvc)).Methods("POST")
-	apiAdmin.HandleFunc("/viajes/activos", viajesHandler.GetActiveViajesAdminHandler()).Methods("GET")
-	apiAdmin.HandleFunc("/notificar-conductor", handlers.NotificarConductorHandler()).Methods("POST")
-
+	// ── Debug ──────────────────────────────────────────────────────────────────
 	r.HandleFunc("/api/debug/websocket", func(w http.ResponseWriter, r *http.Request) {
-		estado := handlers.GetEstadoSuscriptores()
+		estado := wsMgr.GetEstadoSuscriptores()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(estado)
 	}).Methods("GET")
 
+	// ── CORS ───────────────────────────────────────────────────────────────────
 	c := cors.New(cors.Options{
-    AllowOriginFunc: func(origin string) bool {
-        return true
-    },
-    AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-    AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Internal-API-Key", "X-Requested-With"},
-    AllowCredentials: false,
-    MaxAge:           300,
-})
+		AllowOriginFunc: func(origin string) bool {
+			return true
+		},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Internal-API-Key", "X-Requested-With"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	})
 
 	handler := c.Handler(r)
 
-	log.Printf("SafeRoute API Gateway v1.0.0")
-	log.Printf("Arquitectura: Repository → Service → Pipe → Handler")
-	log.Printf("Seguridad: JWT + RBAC + AES-256 + CORS + Rate Limiting")
-	log.Printf("Iniciando en puerto %s", cfg.Port)
-	log.Printf("Documentación: http://localhost:%s/docs/docs.html", cfg.Port)
+	log.Printf("🚀 SafeRoute API v2.0 — Arquitectura Limpia")
+	log.Printf("📦 Módulos: auth · user · reporte · viaje · motor")
+	log.Printf("🔒 Seguridad: JWT + RBAC + AES-256 + CORS + Rate Limiting")
+	log.Printf("🌐 Iniciando en puerto %s", cfg.Port)
+	log.Printf("📚 Documentación: http://localhost:%s/docs/docs.html", cfg.Port)
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, handler))
 }
 
-func StartSignalTimeoutMonitor(db *sql.DB, checkInterval, timeout time.Duration) {
-	ticker := time.NewTicker(checkInterval)
-	go func() {
-		for range ticker.C {
-			rows, err := db.Query(`
-				SELECT v.id, v.user_id, u.nombre, v.ultimo_heartbeat 
-				FROM viajes v
-				JOIN usuarios u ON u.id = v.user_id
-				WHERE v.estado IN ('activo', 'desviado', 'parada_tecnica')
-				  AND v.ultimo_heartbeat < NOW() - INTERVAL '1 second' * $1`,
-				timeout.Seconds(),
-			)
-			if err != nil {
-				log.Printf("[HEARTBEAT] Error consultando timeouts: %v", err)
-				continue
-			}
+// ── Adapters (bridge entre interfaces de módulos y el servicio de motor) ───────
 
-			type viajeAfectado struct {
-				id       string
-				userID   string
-				nombre   string
-				ultimoHB time.Time
-			}
-			var viajesAfectados []viajeAfectado
+// reporteMotorAdapter adapta motor.Service a reporte.MotorService
+type reporteMotorAdapter struct {
+	svc motor.Service
+}
 
-			for rows.Next() {
-				var v viajeAfectado
-				if err := rows.Scan(&v.id, &v.userID, &v.nombre, &v.ultimoHB); err == nil {
-					viajesAfectados = append(viajesAfectados, v)
-				}
-			}
-			rows.Close()
+func (a *reporteMotorAdapter) SyncReporteCreado(rep reporte.ReporteResponse) {
+	a.svc.SyncReporteCreado(rep)
+}
 
-			for _, v := range viajesAfectados {
-				log.Printf("[HEARTBEAT] Señal perdida con conductor %s (Viaje: %s). Último contacto: %v", v.nombre, v.id, v.ultimoHB)
-				
-				_, err := db.Exec("UPDATE viajes SET estado = 'contacto_perdido' WHERE id = $1", v.id)
-				if err != nil {
-					log.Printf("[HEARTBEAT] Error actualizando estado de viaje %s: %v", v.id, err)
-					continue
-				}
+func (a *reporteMotorAdapter) SyncReporteValidado(reporteID string, vigente bool) {
+	a.svc.SyncReporteValidado(reporteID, vigente)
+}
 
-				var lastLat, lastLon float64
-				err = db.QueryRow(`
-					SELECT latitud, longitud 
-					FROM historial_viaje_coordenadas 
-					WHERE viaje_id = $1 
-					ORDER BY timestamp DESC LIMIT 1`, 
-					v.id,
-				).Scan(&lastLat, &lastLon)
+// wsMotorAdapter adapta motor.Service a viaje.MotorService
+type wsMotorAdapter struct {
+	svc motor.Service
+}
 
-				alerta := map[string]interface{}{
-					"tipo":                 "alerta_timeout",
-					"viaje_id":             v.id,
-					"user_id":              v.userID,
-					"nombre_conductor":     v.nombre,
-					"mensaje":              fmt.Sprintf("Se perdió la señal del conductor %s. Último contacto: %s", v.nombre, v.ultimoHB.Local().Format("15:04:05")),
-					"ultimo_contacto_time": v.ultimoHB.Format(time.RFC3339),
-					"lat":                  lastLat,
-					"lon":                  lastLon,
-					"timestamp":            time.Now().UTC().Format(time.RFC3339),
-				}
-				handlers.BroadcastAdminMonitor(alerta)
-			}
+func (a *wsMotorAdapter) SyncInteraccion(tipo, userID, rutaID string, data map[string]interface{}) {
+	a.svc.SyncInteraccion(tipo, userID, rutaID, data)
+}
+
+func (a *wsMotorAdapter) SyncReporteValidado(reporteID string, vigente bool) {
+	a.svc.SyncReporteValidado(reporteID, vigente)
+}
+
+func (a *wsMotorAdapter) SyncReporteCreado(rep reporte.ReporteResponse) {
+	a.svc.SyncReporteCreado(rep)
+}
+
+// wsNotifierAdapter adapta viaje.WebSocketManager a reporte.WSNotifier
+type wsNotifierAdapter struct {
+	mgr *viaje.WebSocketManager
+}
+
+func (a *wsNotifierAdapter) BroadcastNotificacion(n reporte.NotificacionAlerta) {
+	a.mgr.BroadcastNotificacion(n)
+}
+
+func (a *wsNotifierAdapter) NotifyRutasCercanas(rep reporte.ReporteResponse) {
+	a.mgr.NotifyRutasCercanas(rep)
+}
+
+// healthHandler returns a JSON health check
+func healthHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		status := "ok"
+		dbStatus := "ok"
+		if db == nil || db.Ping() != nil {
+			dbStatus = "error"
+			status = "degraded"
 		}
-	}()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":   status,
+			"database": dbStatus,
+			"version":  "2.0.0",
+		})
+	}
 }

@@ -23,6 +23,10 @@ services:
         value: https://saferoute-motor-llm.onrender.com
       - key: ENVIRONMENT
         value: production
+      - key: AUTH_SERVICE_URL
+        value: https://saferoute-auth.koyeb.app
+      - key: INTERNAL_API_KEY
+        sync: false  # Se configura manualmente (misma que en Koyeb)
 
   - type: postgresql
     name: saferoute-db

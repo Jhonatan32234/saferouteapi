@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"saferoute/internal/billing"
 	"saferoute/internal/common"
 	"saferoute/internal/middleware"
 )
@@ -138,16 +139,33 @@ func (h *Handler) GetActiveViajeHandler() http.HandlerFunc {
 	}
 }
 
-func (h *Handler) GetActiveViajesAdminHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		viajes, err := h.viajeSvc.GetActiveViajesAdmin()
-		if err != nil {
-			log.Printf("[ADMIN-VIAJES] Error consultando viajes activos: %v", err)
-			common.WriteError(w, http.StatusInternalServerError, "error consultando viajes activos")
-			return
-		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(viajes)
-	}
+
+// GetActiveViajesAdminHandler ahora filtra por empresa del admin
+func (h *Handler) GetActiveViajesAdminHandler(billingSvc *billing.Service) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        adminID := middleware.GetUserID(r)
+        if adminID == "" {
+            common.WriteError(w, http.StatusUnauthorized, "usuario no autenticado")
+            return
+        }
+
+        // Obtener empresa del admin
+        empresa, err := billingSvc.GetEmpresaByAdminID(adminID)
+        if err != nil {
+            common.WriteError(w, http.StatusNotFound, "empresa no encontrada")
+            return
+        }
+
+        // Solo ver viajes de conductores de SU empresa
+        viajes, err := h.viajeSvc.GetActiveViajesByEmpresa(empresa.ID)
+        if err != nil {
+            log.Printf("[ADMIN-VIAJES] Error consultando viajes: %v", err)
+            common.WriteError(w, http.StatusInternalServerError, "error consultando viajes activos")
+            return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(viajes)
+    }
 }

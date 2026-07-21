@@ -14,6 +14,7 @@ type Repository interface {
 	UpdateEstado(id string, estado string) error
 	UpdateHeartbeat(viajeID string, lat, lon, vel float64) (distanciaDesvio float64, distanciaDestino float64, err error)
 	GetLastCoordinate(viajeID string) (lat float64, lon float64, found bool, err error)
+	FindActiveByEmpresa(empresaID string) ([]ViajeActivoAdmin, error)
 }
 
 type viajeRepository struct {
@@ -22,6 +23,61 @@ type viajeRepository struct {
 
 func NewRepository(db *sql.DB) Repository {
 	return &viajeRepository{db: db}
+}
+
+
+// FindActiveByEmpresa consulta viajes activos solo de conductores de una empresa
+func (r *viajeRepository) FindActiveByEmpresa(empresaID string) ([]ViajeActivoAdmin, error) {
+    query := `
+        SELECT 
+            v.id AS viaje_id,
+            v.user_id,
+            u.nombre AS nombre_conductor,
+            v.ruta_id,
+            v.origen_lat,
+            v.origen_lon,
+            v.destino_lat,
+            v.destino_lon,
+            v.polyline_ruta,
+            v.estado,
+            v.ultimo_heartbeat,
+            COALESCE(h.latitud, v.origen_lat) AS ultima_latitud,
+            COALESCE(h.longitud, v.origen_lon) AS ultima_longitud,
+            COALESCE(h.velocidad_kmh, 0.0) AS ultima_velocidad_kmh
+        FROM viajes v
+        JOIN usuarios u ON u.id = v.user_id
+        LEFT JOIN LATERAL (
+            SELECT latitud, longitud, velocidad_kmh 
+            FROM historial_viaje_coordenadas 
+            WHERE viaje_id = v.id 
+            ORDER BY timestamp DESC LIMIT 1
+        ) h ON true
+        WHERE v.estado IN ('activo', 'desviado', 'parada_tecnica', 'contacto_perdido')
+          AND u.empresa_id = $1
+        ORDER BY v.fecha_inicio DESC`
+
+    rows, err := r.db.Query(query, empresaID)
+    if err != nil {
+        return nil, fmt.Errorf("error consultando viajes activos: %w", err)
+    }
+    defer rows.Close()
+
+    var viajes []ViajeActivoAdmin
+    for rows.Next() {
+        var va ViajeActivoAdmin
+        err := rows.Scan(
+            &va.ViajeID, &va.UserID, &va.NombreConductor, &va.RutaID,
+            &va.OrigenLat, &va.OrigenLon, &va.DestinoLat, &va.DestinoLon,
+            &va.PolylineRuta, &va.Estado, &va.UltimoHeartbeat,
+            &va.UltimaLatitud, &va.UltimaLongitud, &va.UltimaVelocidad,
+        )
+        if err != nil {
+            return nil, fmt.Errorf("error escaneando viaje activo: %w", err)
+        }
+        viajes = append(viajes, va)
+    }
+
+    return viajes, nil
 }
 
 func (r *viajeRepository) Create(viaje *Viaje, wktLineString string) (string, error) {

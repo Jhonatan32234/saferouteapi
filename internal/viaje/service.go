@@ -22,6 +22,8 @@ type Service interface {
 	ActualizarUbicacionViaje(userID string, lat, lon, vel float64) (nuevoEstado string, alertaDesvio bool, err error)
 	GetActiveViaje(userID string) (*Viaje, error)
 	GetActiveViajesAdmin() ([]ViajeActivoAdmin, error)
+	GetActiveViajesByEmpresa(empresaID string) ([]ViajeActivoAdmin, error)  // ← NUEVO
+
 }
 
 type service struct {
@@ -35,6 +37,11 @@ func NewService(viajeRepo Repository, usuarioRepo UsuarioRepository) Service {
 		usuarioRepo: usuarioRepo,
 	}
 }
+
+func (s *service) GetActiveViajesByEmpresa(empresaID string) ([]ViajeActivoAdmin, error) {
+    return s.viajeRepo.FindActiveByEmpresa(empresaID)
+}
+
 
 func (s *service) IniciarViaje(userID string, req IniciarViajeRequest) (string, error) {
 	if req.PolylineRuta == "" {

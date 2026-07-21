@@ -222,7 +222,7 @@ apiAdmin.Use(billingMiddleware)  // Los admins también necesitan suscripción
 apiAdmin.HandleFunc("/resumen", adminReporteHandler.GetAdminResumenHandler()).Methods("GET")
 apiAdmin.HandleFunc("/buscar", adminReporteHandler.BuscarReportesHandler()).Methods("POST")
 apiAdmin.HandleFunc("/registrar-conductor", authHandler.RegistrarConductorHandler(billingSvc)).Methods("POST")
-apiAdmin.HandleFunc("/viajes/activos", viajeHandler.GetActiveViajesAdminHandler()).Methods("GET")
+apiAdmin.HandleFunc("/viajes/activos", viajeHandler.GetActiveViajesAdminHandler(billingSvc)).Methods("GET")
 apiAdmin.HandleFunc("/notificar-conductor", wsMgr.NotificarConductorHandler()).Methods("POST")
 apiAdmin.HandleFunc("/billing/empresas", billingHandler.AdminListEmpresasHandler()).Methods("GET")
 apiAdmin.HandleFunc("/conductores", userHandler.GetConductoresEmpresaHandler(billingSvc)).Methods("GET")

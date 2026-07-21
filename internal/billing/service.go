@@ -531,10 +531,21 @@ func (s *Service) ProcesarWebhook(payload []byte, signature string) error {
 		return fmt.Errorf("webhook secret no configurado")
 	}
 
-	event, err := webhook.ConstructEvent(payload, signature, s.stripeCfg.WebhookSecret)
+	 event, err := webhook.ConstructEventWithOptions(
+        payload,
+        signature,
+        s.stripeCfg.WebhookSecret,
+        webhook.ConstructEventOptions{
+            IgnoreAPIVersionMismatch: true,  // ← AGREGAR ESTO
+        },
+    )
+
 	if err != nil {
-		return fmt.Errorf("error verificando webhook: %w", err)
-	}
+        log.Printf("[WEBHOOK] Error verificando firma: %v", err)
+        return fmt.Errorf("error verificando webhook: %w", err)
+    }
+
+	log.Printf("[WEBHOOK] Evento recibido: %s", event.Type)
 
 	switch event.Type {
 	case "checkout.session.completed":

@@ -165,26 +165,20 @@ func main() {
 	// ── Rutas autenticadas ─────────────────────────────────────────────────────
 	api := httpRouter.PathPrefix("/api").Subrouter()
 	api.Use(middleware.AuthMiddleware(jwtPublicKey))
-	api.Use(billingMiddleware)  // ← Se aplica a TODOS, pero solo verifica admins
-		
-	// ── Rutas de facturación (autenticadas, requiere admin) ────────────────────
-	api.HandleFunc("/billing/empresa", billingHandler.GetMiEmpresaHandler()).Methods("GET")
-	api.HandleFunc("/billing/empresa/crear", billingHandler.CrearSuscripcionHandler()).Methods("POST")
-	api.HandleFunc("/billing/empresa/cambiar-plan", billingHandler.CambiarPlanHandler()).Methods("PUT")
-	api.HandleFunc("/billing/empresa/conductores", billingHandler.AgregarConductoresHandler()).Methods("POST")
-	api.HandleFunc("/billing/empresa/cancelar", billingHandler.CancelarSuscripcionHandler()).Methods("POST")
-	api.HandleFunc("/billing/facturas", billingHandler.GetFacturasHandler()).Methods("GET")
-	api.HandleFunc("/billing/historial", billingHandler.GetHistorialHandler()).Methods("GET")
-
-	// Viajes
-	api.HandleFunc("/viajes/iniciar", viajeHandler.IniciarViajeHandler()).Methods("POST")
-	api.HandleFunc("/viajes/finalizar", viajeHandler.FinalizarViajeHandler()).Methods("POST")
-	api.HandleFunc("/viajes/activo", viajeHandler.GetActiveViajeHandler()).Methods("GET")
 
 	// Usuario
 	api.HandleFunc("/user/profile", userHandler.GetUserProfileHandler()).Methods("GET")
 	api.HandleFunc("/user/profile", userHandler.UpdateUserProfileHandler()).Methods("PUT")
 
+	// Motor de rutas y predicciones
+	api.HandleFunc("/rutas", motorHandler.GetRutasHandler()).Methods("POST")
+	api.HandleFunc("/predicciones/zonas", motor.ProxyHandler(cfg.MotorPrediccionesURL+"/predicciones/zonas")).Methods("POST")
+	api.HandleFunc("/predicciones/perfil", motor.ProxyHandler(cfg.MotorPrediccionesURL+"/predicciones/perfil")).Methods("POST")
+
+	// Viajes
+	api.HandleFunc("/viajes/iniciar", viajeHandler.IniciarViajeHandler()).Methods("POST")
+	api.HandleFunc("/viajes/finalizar", viajeHandler.FinalizarViajeHandler()).Methods("POST")
+	api.HandleFunc("/viajes/activo", viajeHandler.GetActiveViajeHandler()).Methods("GET")
 
 	api.HandleFunc("/user/notificaciones", userHandler.GetHistorialNotificacionesHandler()).Methods("GET")
 	api.HandleFunc("/user/notificaciones/marcar", userHandler.MarcarNotificacionHandler()).Methods("PUT")
@@ -206,11 +200,18 @@ func main() {
 	api.HandleFunc("/reportes/estadisticas", reporteHandler.GetEstadisticasHandler()).Methods("GET")
 	api.HandleFunc("/reportes/{id}", reporteHandler.GetReporteHandler()).Methods("GET")
 	api.HandleFunc("/reportes/{id}/validar", reporteHandler.ValidarReporteHandler()).Methods("PUT")
+	
+	api.Use(billingMiddleware)  // ← Se aplica a TODOS, pero solo verifica admins
+		
+	// ── Rutas de facturación (autenticadas, requiere admin) ────────────────────
+	api.HandleFunc("/billing/empresa", billingHandler.GetMiEmpresaHandler()).Methods("GET")
+	api.HandleFunc("/billing/empresa/crear", billingHandler.CrearSuscripcionHandler()).Methods("POST")
+	api.HandleFunc("/billing/empresa/cambiar-plan", billingHandler.CambiarPlanHandler()).Methods("PUT")
+	api.HandleFunc("/billing/empresa/conductores", billingHandler.AgregarConductoresHandler()).Methods("POST")
+	api.HandleFunc("/billing/empresa/cancelar", billingHandler.CancelarSuscripcionHandler()).Methods("POST")
+	api.HandleFunc("/billing/facturas", billingHandler.GetFacturasHandler()).Methods("GET")
+	api.HandleFunc("/billing/historial", billingHandler.GetHistorialHandler()).Methods("GET")
 
-	// Motor de rutas y predicciones
-	api.HandleFunc("/rutas", motorHandler.GetRutasHandler()).Methods("POST")
-	api.HandleFunc("/predicciones/zonas", motor.ProxyHandler(cfg.MotorPrediccionesURL+"/predicciones/zonas")).Methods("POST")
-	api.HandleFunc("/predicciones/perfil", motor.ProxyHandler(cfg.MotorPrediccionesURL+"/predicciones/perfil")).Methods("POST")
 
 
 	// ── Rutas de administrador ─────────────────────────────────────────────────

@@ -30,6 +30,7 @@ type Service interface {
 
 	// Conductores interno
 	ListConductors() ([]map[string]interface{}, error)
+	GetConductoresByEmpresa(empresaID string) ([]UserProfile, error)
 }
 
 type userService struct {
@@ -55,6 +56,11 @@ func (s *userService) GetProfile(userID string) (UserProfile, error) {
 	}()
 
 	return entityToUserProfile(usuario), nil
+}
+
+
+func (s *userService) GetConductoresByEmpresa(empresaID string) ([]UserProfile, error) {
+    return s.repo.GetConductoresByEmpresa(empresaID)
 }
 
 func (s *userService) UpdateProfile(userID string, req UpdateProfileRequest) error {

@@ -6,9 +6,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"saferoute/internal/common"
+
+	"github.com/gorilla/mux"
 )
 
 type RutasRequest struct {
@@ -109,6 +112,39 @@ func (h *Handler) GetRutasHandler() http.HandlerFunc {
 		w.Header().Set("X-Data-Source", "motor-rutas")
 		w.Write(respBody)
 	}
+}
+
+// GetPerfilConductorHandler - GET /api/admin/conductores/{id}/perfil
+func (h *Handler) GetPerfilConductorHandler() http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        vars := mux.Vars(r)
+        conductorID := vars["id"]
+
+        motorURL := os.Getenv("MOTOR_PREDICCIONES_URL")
+        if motorURL == "" {
+            motorURL = "http://localhost:8003"
+        }
+
+        payload := map[string]string{"conductor_id": conductorID}
+        body, _ := json.Marshal(payload)
+
+        resp, err := http.Post(
+            motorURL+"/predicciones/perfil",
+            "application/json",
+            bytes.NewBuffer(body),
+        )
+        if err != nil {
+            common.WriteError(w, http.StatusServiceUnavailable, "motor de predicciones no disponible")
+            return
+        }
+        defer resp.Body.Close()
+
+        var perfil interface{}
+        json.NewDecoder(resp.Body).Decode(&perfil)
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(perfil)
+    }
 }
 
 func ProxyHandler(targetURL string) http.HandlerFunc {

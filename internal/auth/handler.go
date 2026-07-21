@@ -2,12 +2,15 @@ package auth
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 
 	"github.com/gorilla/mux"
 
+	"saferoute/internal/billing"
 	"saferoute/internal/common"
+	"saferoute/internal/middleware"
 )
 
 type Handler struct {
@@ -148,8 +151,87 @@ func (h *Handler) GetUserHandler() http.HandlerFunc {
 	}
 }
 
-func (h *Handler) RegistrarConductorHandler() http.HandlerFunc {
+// RegistrarAdminPublicoHandler - Endpoint PÚBLICO para registro de admin.
+// Crea el admin pero con estado "pendiente_pago". Sin plan = sin acceso.
+func (h *Handler) RegistrarAdminPublicoHandler() http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+            Email    string `json:"email"`
+            Password string `json:"password"`
+            Nombre   string `json:"nombre"`
+            Telefono string `json:"telefono"`
+        }
+
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+            common.WriteError(w, http.StatusBadRequest, "datos inválidos")
+            return
+        }
+
+        if req.Email == "" || req.Password == "" || req.Nombre == "" {
+            common.WriteError(w, http.StatusBadRequest, "email, password y nombre son requeridos")
+            return
+        }
+
+        if len(req.Password) < 6 {
+            common.WriteError(w, http.StatusBadRequest, "la contraseña debe tener al menos 6 caracteres")
+            return
+        }
+
+        // Llamar al Auth Service (él crea admin + empresa pendiente)
+        result, err := h.authSvc.RegisterAdminPublico(req.Email, req.Password, req.Nombre, req.Telefono)
+        if err != nil {
+            common.WriteError(w, http.StatusConflict, err.Error())
+            return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusCreated)
+        json.NewEncoder(w).Encode(map[string]interface{}{
+            "id":      result.UserID,
+            "token":   result.Token,
+            "nombre":  result.Nombre,
+            "email":   result.Email,
+            "tipo":    result.Tipo,
+            "status":  "pendiente_pago",
+            "mensaje": "Cuenta creada. Elige un plan para acceder a todas las funcionalidades.",
+            "redirect": "/precios",
+        })
+    }
+}
+
+
+
+func (h *Handler) RegistrarConductorHandler(billingSvc *billing.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		adminID := middleware.GetUserID(r)
+        if adminID == "" {
+            common.WriteError(w, http.StatusUnauthorized, "usuario no autenticado")
+            return
+        }
+
+		if billingSvc != nil {
+            empresa, err := billingSvc.GetEmpresaByAdminID(adminID)
+            if err != nil {
+                common.WriteError(w, http.StatusForbidden, 
+                    "no tienes una empresa registrada. Crea tu plan primero.")
+                return
+            }
+            if empresa.EstadoSuscripcion != billing.EstadoActivo {
+                common.WriteError(w, http.StatusForbidden, 
+                    "tu suscripción no está activa")
+                return
+            }
+            
+            total, _ := billingSvc.GetTotalConductoresByEmpresa(empresa.ID)
+            limite := empresa.MaxConductores + empresa.ConductoresExtra
+            if total >= limite {
+                common.WriteError(w, http.StatusForbidden,
+                    fmt.Sprintf("límite de conductores alcanzado (%d/%d). Agrega más conductores extra o actualiza tu plan.",
+                        total, limite))
+                return
+            }
+        }
+
 		var req struct {
 			Email    string `json:"email"`
 			Password string `json:"password"`
@@ -174,7 +256,7 @@ func (h *Handler) RegistrarConductorHandler() http.HandlerFunc {
 			return
 		}
 
-		id, err := h.authSvc.RegisterConductor(validateReq.Email, validateReq.Password, validateReq.Nombre, validateReq.Telefono)
+		id, err := h.authSvc.RegisterConductor(validateReq.Email, validateReq.Password, validateReq.Nombre, validateReq.Telefono, adminID)
 		if err != nil {
 			common.WriteError(w, http.StatusConflict, err.Error())
 			return

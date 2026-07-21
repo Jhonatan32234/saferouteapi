@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"saferoute/internal/billing"
 	"saferoute/internal/common"
 	"saferoute/internal/middleware"
 )
@@ -35,6 +36,37 @@ func (h *Handler) GetUserProfileHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(profile)
 	}
+}
+
+// GetConductoresEmpresaHandler - Lista conductores de la empresa del admin
+func (h *Handler) GetConductoresEmpresaHandler(billingSvc *billing.Service) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        adminID := middleware.GetUserID(r)
+        if adminID == "" {
+            common.WriteError(w, http.StatusUnauthorized, "usuario no autenticado")
+            return
+        }
+
+        // Obtener empresa del admin
+        empresa, err := billingSvc.GetEmpresaByAdminID(adminID)
+        if err != nil {
+            common.WriteError(w, http.StatusNotFound, "empresa no encontrada")
+            return
+        }
+
+        // Obtener conductores de la empresa
+        conductores, err := h.userSvc.GetConductoresByEmpresa(empresa.ID)
+        if err != nil {
+            common.WriteError(w, http.StatusInternalServerError, "error consultando conductores")
+            return
+        }
+
+        common.WriteJSON(w, http.StatusOK, map[string]interface{}{
+            "conductores": conductores,
+            "total":       len(conductores),
+            "limite":      empresa.MaxConductores + empresa.ConductoresExtra,
+        })
+    }
 }
 
 func (h *Handler) UpdateUserProfileHandler() http.HandlerFunc {

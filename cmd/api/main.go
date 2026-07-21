@@ -16,6 +16,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"saferoute/internal/auth"
+	"saferoute/internal/billing"
 	"saferoute/internal/config"
 	"saferoute/internal/database"
 	"saferoute/internal/middleware"
@@ -90,6 +91,21 @@ func main() {
 	wsAdapter := &wsMotorAdapter{svc: motorSvc}
 	wsMgr := viaje.NewWebSocketManager(db, viajeSvc, wsAdapter, jwtPublicKey)
 
+	// ── Billing (Facturación / Planes Empresariales) ──────────────────────────
+	billingRepo := billing.NewRepository(db)
+	billingStripeCfg := &billing.StripeConfig{
+		SecretKey:      cfg.StripeSecretKey,
+		WebhookSecret:  cfg.StripeWebhookSecret,
+		PriceBasico:    cfg.StripePriceBasico,
+		PricePro:       cfg.StripePricePro,
+		PriceExtra:     cfg.StripePriceExtra,
+		SuccessURL:     cfg.StripeSuccessURL,
+		CancelURL:      cfg.StripeCancelURL,
+	}
+	billingSvc := billing.NewService(billingRepo, billingStripeCfg)
+	billingMiddleware := middleware.RequireActiveSubscription(billingSvc)
+	billingHandler := billing.NewHandler(billingSvc)
+
 	// ── Handlers ───────────────────────────────────────────────────────────────
 	authHandler := auth.NewHandler(authSvc, cfg.JWTSecret)
 	userHandler := user.NewHandler(userSvc)
@@ -138,10 +154,27 @@ func main() {
 	httpRouter.HandleFunc("/api/auth/register", authHandler.RegisterHandler()).Methods("POST")
 	httpRouter.HandleFunc("/api/health", healthHandler(db)).Methods("GET", "HEAD")
 	httpRouter.HandleFunc("/api/clusters", motor.ProxyHandler(cfg.MotorRutasURL+"/clusters")).Methods("GET")
+	httpRouter.HandleFunc("/api/auth/register-admin", authHandler.RegistrarAdminPublicoHandler()).Methods("POST") 
+
+	// ── Rutas públicas de facturación ──────────────────────────────────────────
+	httpRouter.HandleFunc("/api/billing/plans", billingHandler.GetPlanesHandler()).Methods("GET")
+	httpRouter.HandleFunc("/api/billing/metodos-pago", billingHandler.GetMetodosPagoHandler()).Methods("GET")
+	httpRouter.HandleFunc("/api/billing/precios/calcular", billingHandler.CalcularPrecioHandler()).Methods("GET")
+	httpRouter.HandleFunc("/api/webhooks/stripe", billingHandler.WebhookStripeHandler()).Methods("POST")
 
 	// ── Rutas autenticadas ─────────────────────────────────────────────────────
 	api := httpRouter.PathPrefix("/api").Subrouter()
 	api.Use(middleware.AuthMiddleware(jwtPublicKey))
+	api.Use(billingMiddleware)  // ← Se aplica a TODOS, pero solo verifica admins
+		
+	// ── Rutas de facturación (autenticadas, requiere admin) ────────────────────
+	api.HandleFunc("/billing/empresa", billingHandler.GetMiEmpresaHandler()).Methods("GET")
+	api.HandleFunc("/billing/empresa/crear", billingHandler.CrearSuscripcionHandler()).Methods("POST")
+	api.HandleFunc("/billing/empresa/cambiar-plan", billingHandler.CambiarPlanHandler()).Methods("PUT")
+	api.HandleFunc("/billing/empresa/conductores", billingHandler.AgregarConductoresHandler()).Methods("POST")
+	api.HandleFunc("/billing/empresa/cancelar", billingHandler.CancelarSuscripcionHandler()).Methods("POST")
+	api.HandleFunc("/billing/facturas", billingHandler.GetFacturasHandler()).Methods("GET")
+	api.HandleFunc("/billing/historial", billingHandler.GetHistorialHandler()).Methods("GET")
 
 	// Viajes
 	api.HandleFunc("/viajes/iniciar", viajeHandler.IniciarViajeHandler()).Methods("POST")
@@ -151,6 +184,8 @@ func main() {
 	// Usuario
 	api.HandleFunc("/user/profile", userHandler.GetUserProfileHandler()).Methods("GET")
 	api.HandleFunc("/user/profile", userHandler.UpdateUserProfileHandler()).Methods("PUT")
+
+
 	api.HandleFunc("/user/notificaciones", userHandler.GetHistorialNotificacionesHandler()).Methods("GET")
 	api.HandleFunc("/user/notificaciones/marcar", userHandler.MarcarNotificacionHandler()).Methods("PUT")
 	api.HandleFunc("/user/notificaciones/marcar-todas", userHandler.MarcarTodasNotificacionesHandler()).Methods("PUT")
@@ -177,15 +212,19 @@ func main() {
 	api.HandleFunc("/predicciones/zonas", motor.ProxyHandler(cfg.MotorPrediccionesURL+"/predicciones/zonas")).Methods("POST")
 	api.HandleFunc("/predicciones/perfil", motor.ProxyHandler(cfg.MotorPrediccionesURL+"/predicciones/perfil")).Methods("POST")
 
+
 	// ── Rutas de administrador ─────────────────────────────────────────────────
 	apiAdmin := api.PathPrefix("/admin").Subrouter()
 	apiAdmin.Use(middleware.RoleMiddleware(jwtPublicKey, "admin"))
 	apiAdmin.HandleFunc("/resumen", adminReporteHandler.GetAdminResumenHandler()).Methods("GET")
 	apiAdmin.HandleFunc("/buscar", adminReporteHandler.BuscarReportesHandler()).Methods("POST")
-	apiAdmin.HandleFunc("/registrar-conductor", authHandler.RegistrarConductorHandler()).Methods("POST")
+	apiAdmin.HandleFunc("/registrar-conductor", authHandler.RegistrarConductorHandler(billingSvc)).Methods("POST")
 	apiAdmin.HandleFunc("/viajes/activos", viajeHandler.GetActiveViajesAdminHandler()).Methods("GET")
 	apiAdmin.HandleFunc("/notificar-conductor", wsMgr.NotificarConductorHandler()).Methods("POST")
-
+	apiAdmin.HandleFunc("/billing/empresas", billingHandler.AdminListEmpresasHandler()).Methods("GET")
+	apiAdmin.HandleFunc("/conductores", userHandler.GetConductoresEmpresaHandler(billingSvc)).Methods("GET")
+	// En la sección de rutas admin:
+	apiAdmin.HandleFunc("/conductores/{id}/perfil", motorHandler.GetPerfilConductorHandler()).Methods("GET")
 	// ── Debug ──────────────────────────────────────────────────────────────────
 	r.HandleFunc("/api/debug/websocket", func(w http.ResponseWriter, r *http.Request) {
 		estado := wsMgr.GetEstadoSuscriptores()

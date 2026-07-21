@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"saferoute/internal/security"
 	"strings"
 	"time"
 )
@@ -40,6 +41,7 @@ type Repository interface {
 
 	// Conductores interno
 	ListConductors() ([]map[string]interface{}, error)
+	GetConductoresByEmpresa(empresaID string) ([]UserProfile, error)
 }
 
 type userRepository struct {
@@ -68,6 +70,35 @@ func (r *userRepository) FindByEmail(email string) (*UsuarioEntity, error) {
 		return nil, fmt.Errorf("AfterLoad error: %w", err)
 	}
 	return u, nil
+}
+
+func (r *userRepository) GetConductoresByEmpresa(empresaID string) ([]UserProfile, error) {
+    rows, err := r.db.Query(`
+        SELECT id, email, nombre, tipo, COALESCE(telefono, ''), created_at
+        FROM usuarios 
+        WHERE empresa_id = $1 AND tipo = 'conductor'
+        ORDER BY created_at DESC`, empresaID)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+
+    var conductores []UserProfile
+    for rows.Next() {
+        var u UserProfile
+        if err := rows.Scan(&u.ID, &u.Email, &u.Nombre, &u.Tipo, &u.Telefono, &u.CreatedAt); err != nil {
+            continue
+        }
+        // Desencriptar teléfono
+        if u.Telefono != "" {
+            decrypted, _ := security.Decrypt(u.Telefono, r.encryptionKey)
+            if decrypted != "" {
+                u.Telefono = decrypted
+            }
+        }
+        conductores = append(conductores, u)
+    }
+    return conductores, nil
 }
 
 func (r *userRepository) FindByID(id string) (*UsuarioPerfilConEstadisticas, error) {

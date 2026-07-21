@@ -126,39 +126,75 @@ func (s *AuthService) Register(req RegisterRequest) (AuthResponse, error) {
 	return result, nil
 }
 
-func (s *AuthService) RegisterConductor(email, password, nombre, telefono string) (string, error) {
-	reqBody := map[string]string{
-		"email":    email,
-		"password": password,
-		"nombre":   nombre,
-		"telefono": telefono,
-	}
+// RegisterAdminPublico registra un admin desde el endpoint público.
+// El Auth Service crea el admin + empresa pendiente.
+func (s *AuthService) RegisterAdminPublico(email, password, nombre, telefono string) (AuthResponse, error) {
+    reqBody := map[string]string{
+        "email":    email,
+        "password": password,
+        "nombre":   nombre,
+        "telefono": telefono,
+    }
 
-	resp, err := s.sendSignedRequest("POST", "/auth/internal/registrar-conductor", reqBody)
-	if err != nil {
-		return "", fmt.Errorf("error conectando al servicio de autenticación: %w", err)
-	}
-	defer resp.Body.Close()
+    // Llamada firmada al Auth Service
+    resp, err := s.sendSignedRequest("POST", "/auth/internal/registrar-admin-publico", reqBody)
+    if err != nil {
+        return AuthResponse{}, fmt.Errorf("error conectando al servicio de autenticación: %w", err)
+    }
+    defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		var errResp map[string]interface{}
-		json.NewDecoder(resp.Body).Decode(&errResp)
-		if msg, ok := errResp["error"].(string); ok {
-			return "", fmt.Errorf(msg)
-		}
-		return "", fmt.Errorf("error en servicio de autenticación: código %d", resp.StatusCode)
-	}
+    if resp.StatusCode != http.StatusCreated {
+        var errResp map[string]interface{}
+        json.NewDecoder(resp.Body).Decode(&errResp)
+        if msg, ok := errResp["error"].(string); ok {
+            return AuthResponse{}, fmt.Errorf(msg)
+        }
+        return AuthResponse{}, fmt.Errorf("error en servicio de autenticación: código %d", resp.StatusCode)
+    }
 
-	var result struct {
-		ID string `json:"id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("error decodificando respuesta: %w", err)
-	}
+    var result AuthResponse
+    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+        return AuthResponse{}, fmt.Errorf("error decodificando respuesta: %w", err)
+    }
 
-	return result.ID, nil
+    return result, nil
 }
 
+// saferoute/internal/auth/auth_service.go
+
+func (s *AuthService) RegisterConductor(email, password, nombre, telefono, adminID string) (string, error) {
+    reqBody := map[string]string{
+        "email":    email,
+        "password": password,
+        "nombre":   nombre,
+        "telefono": telefono,
+        "admin_id": adminID,  // ← PASAR adminID
+    }
+
+    resp, err := s.sendSignedRequest("POST", "/auth/internal/registrar-conductor", reqBody)
+    if err != nil {
+        return "", fmt.Errorf("error conectando al servicio de autenticación: %w", err)
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+        var errResp map[string]interface{}
+        json.NewDecoder(resp.Body).Decode(&errResp)
+        if msg, ok := errResp["error"].(string); ok {
+            return "", fmt.Errorf(msg)
+        }
+        return "", fmt.Errorf("error en servicio de autenticación: código %d", resp.StatusCode)
+    }
+
+    var result struct {
+        ID string `json:"id"`
+    }
+    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+        return "", fmt.Errorf("error decodificando respuesta: %w", err)
+    }
+
+    return result.ID, nil
+}
 func (s *AuthService) ValidateToken(tokenString string) (map[string]interface{}, error) {
 	reqBody := map[string]string{
 		"token": tokenString,

@@ -23,6 +23,15 @@ type Config struct {
 	AuthServiceURL string
 	JWTPublicKey     string
 	ServicePrivateKey string
+
+	// Stripe
+	StripeSecretKey     string
+	StripeWebhookSecret string
+	StripePriceBasico   string
+	StripePricePro      string
+	StripePriceExtra    string
+	StripeSuccessURL    string
+	StripeCancelURL     string
 }
 
 type RateLimitConfig struct {
@@ -127,5 +136,14 @@ func Load() (*Config, error) {
         AuthServiceURL:      authServiceURL,
         JWTPublicKey:        jwtPublicKey,
         ServicePrivateKey:   servicePrivateKey,
+
+        // Stripe
+        StripeSecretKey:     os.Getenv("STRIPE_SECRET_KEY"),
+        StripeWebhookSecret: os.Getenv("STRIPE_WEBHOOK_SECRET"),
+        StripePriceBasico:   os.Getenv("STRIPE_PRICE_BASICO"),
+        StripePricePro:      os.Getenv("STRIPE_PRICE_PRO"),
+        StripePriceExtra:    os.Getenv("STRIPE_PRICE_EXTRA"),
+        StripeSuccessURL:    os.Getenv("STRIPE_SUCCESS_URL"),
+        StripeCancelURL:     os.Getenv("STRIPE_CANCEL_URL"),
     }, nil
 }

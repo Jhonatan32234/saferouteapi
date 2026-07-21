@@ -12,3 +12,5 @@ require (
 	golang.org/x/crypto v0.53.0
 	golang.org/x/time v0.15.0
 )
+
+require github.com/stripe/stripe-go/v81 v81.4.0

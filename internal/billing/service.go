@@ -51,111 +51,152 @@ func (s *Service) GetTotalConductoresByEmpresa(empresaID string) (int, error) {
 // ─── Empresa ───────────────────────────────────────────────────
 
 func (s *Service) CrearEmpresa(adminID string, req CrearEmpresaRequest) (*CheckoutResponse, error) {
-	// Verificar que el admin no tenga ya una empresa
-	existing, _ := s.repo.GetEmpresaByAdminID(adminID)
-	if existing != nil {
-		return nil, fmt.Errorf("el administrador ya tiene una empresa registrada")
-	}
+    // Validar plan
+    if req.Plan != PlanBasico && req.Plan != PlanProfesional {
+        return nil, fmt.Errorf("plan inválido: debe ser 'basico' o 'profesional'")
+    }
 
-	// Validar plan
-	if req.Plan != PlanBasico && req.Plan != PlanProfesional {
-		return nil, fmt.Errorf("plan inválido: debe ser 'basico' o 'profesional'")
-	}
+    // Validar método de pago
+    metodosValidos := map[string]bool{
+        "tarjeta": true,
+        "oxxo":    true,
+        "spei":    true,
+    }
+    if !metodosValidos[req.MetodoPago] {
+        return nil, fmt.Errorf("método de pago inválido: use 'tarjeta', 'oxxo' o 'spei'")
+    }
 
-	// Validar método de pago
-	metodosValidos := map[string]bool{
-		"tarjeta": true,
-		"oxxo":    true,
-		"spei":    true,
-	}
-	if !metodosValidos[req.MetodoPago] {
-		return nil, fmt.Errorf("método de pago inválido: use 'tarjeta', 'oxxo' o 'spei'")
-	}
+    // Verificar si ya existe una empresa para este admin
+    existing, _ := s.repo.GetEmpresaByAdminID(adminID)
+    
+    var empresa *Empresa
+    
+    if existing != nil {
+        // ✅ Si la empresa existe pero está pendiente, actualizarla
+        if existing.EstadoSuscripcion == EstadoPendiente {
+            existing.NombreEmpresa = req.NombreEmpresa
+            existing.PlanActual = req.Plan
+            existing.MaxConductores = LimitesConductores[req.Plan]
+            existing.RFC = req.RFC
+            existing.EmailFacturacion = req.EmailFacturacion
+            
+            if err := s.repo.UpdateEmpresa(existing); err != nil {
+                return nil, fmt.Errorf("error actualizando empresa: %w", err)
+            }
+            
+            empresa = existing
+            log.Printf("[BILLING] Empresa pendiente actualizada: %s con plan %s", empresa.ID, req.Plan)
+            
+        } else if existing.EstadoSuscripcion == EstadoActivo {
+            return nil, fmt.Errorf("el administrador ya tiene una empresa activa. Si deseas cambiar de plan, usa la opción 'Cambiar Plan'")
+            
+        } else {
+            // Cancelada o expirada → permitir reactivar
+            existing.NombreEmpresa = req.NombreEmpresa
+            existing.PlanActual = req.Plan
+            existing.MaxConductores = LimitesConductores[req.Plan]
+            existing.EstadoSuscripcion = EstadoPendiente
+            existing.RFC = req.RFC
+            existing.EmailFacturacion = req.EmailFacturacion
+            
+            if err := s.repo.UpdateEmpresa(existing); err != nil {
+                return nil, fmt.Errorf("error actualizando empresa: %w", err)
+            }
+            
+            empresa = existing
+            log.Printf("[BILLING] Empresa %s reactivada con plan %s", empresa.ID, req.Plan)
+        }
+    } else {
+        // ✅ Crear nueva empresa (primera vez)
+        empresa = &Empresa{
+            AdminID:           adminID,
+            NombreEmpresa:     req.NombreEmpresa,
+            RFC:               req.RFC,
+            EmailFacturacion:  req.EmailFacturacion,
+            PlanActual:        req.Plan,
+            EstadoSuscripcion: EstadoPendiente,
+            MaxConductores:    LimitesConductores[req.Plan],
+            ConductoresExtra:  0,
+        }
+        
+        if err := s.repo.CrearEmpresa(empresa); err != nil {
+            return nil, fmt.Errorf("error guardando empresa: %w", err)
+        }
+        
+        log.Printf("[BILLING] Nueva empresa creada: %s con plan %s", empresa.ID, req.Plan)
+    }
 
-	// Calcular precios
-	subtotal, iva, total := CalcularPrecioTotal(req.Plan, 0)
+    // ✅ Crear customer en Stripe si no tiene uno
+    if s.stripeCfg != nil && s.stripeCfg.SecretKey != "" && empresa.StripeCustomerID == "" {
+        cust, err := customer.New(&stripe.CustomerParams{
+            Name:  stripe.String(empresa.NombreEmpresa),
+            Email: stripe.String(empresa.EmailFacturacion),
+            Metadata: map[string]string{
+                "admin_id":        adminID,
+                "nombre_empresa":  empresa.NombreEmpresa,
+            },
+        })
+        if err != nil {
+            log.Printf("[BILLING] Error creando customer en Stripe: %v", err)
+            // No fallar - se puede crear después
+        } else {
+            empresa.StripeCustomerID = cust.ID
+            // Actualizar el customer ID en BD
+            _ = s.repo.UpdateEmpresa(empresa)
+        }
+    }
 
-	// Crear empresa en estado pendiente
-	empresa := &Empresa{
-		AdminID:           adminID,
-		NombreEmpresa:     req.NombreEmpresa,
-		RFC:               req.RFC,
-		EmailFacturacion:  req.EmailFacturacion,
-		PlanActual:        req.Plan,
-		EstadoSuscripcion: EstadoPendiente,
-		MaxConductores:    LimitesConductores[req.Plan],
-		ConductoresExtra:  0,
-	}
+    // Calcular precios
+    subtotal, iva, total := CalcularPrecioTotal(req.Plan, 0)
 
-	// Crear customer en Stripe
-	if s.stripeCfg != nil && s.stripeCfg.SecretKey != "" {
-		cust, err := customer.New(&stripe.CustomerParams{
-			Name:  stripe.String(empresa.NombreEmpresa),
-			Email: stripe.String(empresa.EmailFacturacion),
-			Metadata: map[string]string{
-				"admin_id":    adminID,
-				"nombre_empresa": empresa.NombreEmpresa,
-			},
-		})
-		if err != nil {
-			return nil, fmt.Errorf("error creando customer en Stripe: %w", err)
-		}
-		empresa.StripeCustomerID = cust.ID
-	}
+    // Registrar historial
+    _ = s.repo.RegistrarHistorial(empresa.ID, CambioCreacion,
+        fmt.Sprintf("Empresa creada con plan %s", req.Plan), map[string]interface{}{
+            "plan":        req.Plan,
+            "metodo_pago": req.MetodoPago,
+        })
 
-	// Guardar empresa en BD
-	if err := s.repo.CrearEmpresa(empresa); err != nil {
-		return nil, fmt.Errorf("error guardando empresa: %w", err)
-	}
+    // Crear factura pendiente
+    now := time.Now()
+    yearEnd := now.AddDate(1, 0, 0)
+    factura := &Factura{
+        EmpresaID:             empresa.ID,
+        Subtotal:              subtotal,
+        IVA:                   iva,
+        Total:                 total,
+        Plan:                  req.Plan,
+        ConductoresBase:       LimitesConductores[req.Plan],
+        ConductoresExtra:      0,
+        CargoConductoresExtra: 0,
+        PeriodoInicio:         &now,
+        PeriodoFin:            &yearEnd,
+        Estado:                string(FacturaPendiente),
+        MetodoPago:            req.MetodoPago,
+    }
+    if err := s.repo.CrearFactura(factura); err != nil {
+        log.Printf("[BILLING] Error creando factura: %v", err)
+    }
 
-	// Registrar historial
-	_ = s.repo.RegistrarHistorial(empresa.ID, CambioCreacion,
-		fmt.Sprintf("Empresa creada con plan %s", req.Plan), map[string]interface{}{
-			"plan":        req.Plan,
-			"metodo_pago": req.MetodoPago,
-		})
+    _ = s.repo.RegistrarHistorial(empresa.ID, CambioFacturaGenerada,
+        fmt.Sprintf("Factura generada: $%.2f MXN", total), nil)
 
-	// Crear factura pendiente
-	now := time.Now()
-	yearEnd := now.AddDate(1, 0, 0)
-	factura := &Factura{
-		EmpresaID:             empresa.ID,
-		Subtotal:              subtotal,
-		IVA:                   iva,
-		Total:                 total,
-		Plan:                  req.Plan,
-		ConductoresBase:       LimitesConductores[req.Plan],
-		ConductoresExtra:      0,
-		CargoConductoresExtra: 0,
-		PeriodoInicio:         &now,
-		PeriodoFin:            &yearEnd,
-		Estado:                string(FacturaPendiente),
-		MetodoPago:            req.MetodoPago,
-	}
-	if err := s.repo.CrearFactura(factura); err != nil {
-		log.Printf("Error creando factura: %v", err)
-	}
+    // Crear sesión de checkout en Stripe
+    checkoutURL := ""
+    if s.stripeCfg != nil && s.stripeCfg.SecretKey != "" {
+        url, err := s.crearCheckoutSession(empresa, factura, req.MetodoPago)
+        if err != nil {
+            log.Printf("[BILLING] Error creando checkout session: %v", err)
+        } else {
+            checkoutURL = url
+        }
+    }
 
-	_ = s.repo.RegistrarHistorial(empresa.ID, CambioFacturaGenerada,
-		fmt.Sprintf("Factura generada: $%.2f MXN", total), nil)
-
-	// Crear sesión de checkout en Stripe
-	checkoutURL := ""
-	if s.stripeCfg != nil && s.stripeCfg.SecretKey != "" {
-		url, err := s.crearCheckoutSession(empresa, factura, req.MetodoPago)
-		if err != nil {
-			log.Printf("Error creando checkout session: %v", err)
-		} else {
-			checkoutURL = url
-		}
-	}
-
-	return &CheckoutResponse{
-		Status:      "pendiente",
-		EmpresaID:   empresa.ID,
-		CheckoutURL: checkoutURL,
-		Total:       total,
-	}, nil
+    return &CheckoutResponse{
+        Status:      "pendiente",
+        EmpresaID:   empresa.ID,
+        CheckoutURL: checkoutURL,
+        Total:       total,
+    }, nil
 }
 
 func (s *Service) crearCheckoutSession(empresa *Empresa, factura *Factura, metodoPago string) (string, error) {
@@ -314,6 +355,28 @@ func (s *Service) CambiarPlan(adminID string, req CambiarPlanRequest) error {
             s.actualizarSuscripcionStripe(empresa, conductoresSobrantes)
         }
 
+		if conductoresSobrantes > 0 {
+            ahora := time.Now()
+            yearEnd := ahora.AddDate(1, 0, 0)
+            cargoExtra := float64(conductoresSobrantes) * PrecioConductorExtra
+            
+            factura := &Factura{
+                EmpresaID:             empresa.ID,
+                Subtotal:              cargoExtra,
+                IVA:                   cargoExtra * 0.16,
+                Total:                 cargoExtra * 1.16,
+                Plan:                  PlanBasico,
+                ConductoresBase:       limiteNuevoPlan,
+                ConductoresExtra:      conductoresSobrantes,
+                CargoConductoresExtra: cargoExtra,
+                PeriodoInicio:         &ahora,
+                PeriodoFin:            &yearEnd,
+                Estado:                string(FacturaPendiente),
+            }
+            if err := s.repo.CrearFactura(factura); err != nil {
+                log.Printf("Error creando factura por conductores extra: %v", err)
+            }
+        }
         _ = s.repo.RegistrarHistorial(empresa.ID, CambioCambioPlan,
             fmt.Sprintf("Downgrade: Profesional → Básico. %d conductores extra", conductoresSobrantes),
             map[string]interface{}{

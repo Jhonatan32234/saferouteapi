@@ -337,12 +337,17 @@ func (s *Service) CambiarPlan(adminID string, req CambiarPlanRequest) error {
 
     limiteNuevoPlan := LimitesConductores[req.PlanNuevo]
 
+	log.Print("limite nuevo plan:",limiteNuevoPlan)
+
     // ✅ Downgrade: Profesional → Básico
     if req.PlanNuevo == PlanBasico && empresa.PlanActual == PlanProfesional {
+		log.Print("downgrade")
         conductoresSobrantes := 0
         if totalConductores > limiteNuevoPlan {
             conductoresSobrantes = totalConductores - limiteNuevoPlan
         }
+
+		log.Print("conductores sobrantes:",conductoresSobrantes)
 
         empresa.PlanActual = PlanBasico
         empresa.MaxConductores = limiteNuevoPlan
@@ -355,8 +360,10 @@ func (s *Service) CambiarPlan(adminID string, req CambiarPlanRequest) error {
         if empresa.StripeSubscriptionID != "" && s.stripeCfg != nil {
             s.actualizarSuscripcionStripe(empresa, conductoresSobrantes)
         }
+		log.Print("evaluar")
 
 		if conductoresSobrantes > 0 {
+			log.Print("generar factura")
             ahora := time.Now()
             yearEnd := ahora.AddDate(1, 0, 0)
             cargoExtra := float64(conductoresSobrantes) * PrecioConductorExtra

@@ -333,6 +333,7 @@ func (s *Service) CambiarPlan(adminID string, req CambiarPlanRequest) error {
     if err != nil {
         return fmt.Errorf("error contando conductores: %w", err)
     }
+	log.Print("Total conductores:",totalConductores)
 
     limiteNuevoPlan := LimitesConductores[req.PlanNuevo]
 

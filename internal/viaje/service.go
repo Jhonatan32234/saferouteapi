@@ -151,7 +151,6 @@ func (s *service) ActualizarUbicacionViaje(userID string, lat, lon, vel float64)
 			err = s.viajeRepo.UpdateEstado(viaje.ID, "desviado")
 			if err == nil {
 				alertaDesvio = true
-				log.Printf("Alerta de Desvío detectada para el viaje %s (Conductor: %s). Desviado %.1fm", viaje.ID, userID, distDesvio)
 			}
 		}
 	} else {

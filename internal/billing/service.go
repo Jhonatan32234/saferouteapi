@@ -692,9 +692,18 @@ func (s *Service) handleCheckoutCompletado(event stripe.Event) error {
     }
 
 	conductoresExtra := 0
-    for _, item := range sess.LineItems.Data {
-        if item.Price.ID == s.stripeCfg.PriceExtra {
-            conductoresExtra += int(item.Quantity)
+    if s.stripeCfg != nil && s.stripeCfg.SecretKey != "" {
+        stripe.Key = s.stripeCfg.SecretKey
+        
+        params := &stripe.CheckoutSessionListLineItemsParams{}
+        params.Session = stripe.String(sess.ID)
+        
+        iter := session.ListLineItems(params)
+        for iter.Next() {
+            item := iter.LineItem()
+            if item.Price != nil && item.Price.ID == s.stripeCfg.PriceExtra {
+                conductoresExtra += int(item.Quantity)
+            }
         }
     }
 

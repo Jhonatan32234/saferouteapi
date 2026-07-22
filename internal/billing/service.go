@@ -373,6 +373,7 @@ func (s *Service) CambiarPlan(adminID string, req CambiarPlanRequest) error {
             Estado:                string(FacturaPendiente),
             MetodoPago:            "manual",
         }
+		log.Print("factura:",factura)
         if err := s.repo.CrearFactura(factura); err != nil {
             log.Printf("[FACTURA] Error: %v", err)
         }

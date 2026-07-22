@@ -16,7 +16,7 @@ type Repository interface {
 	GetEmpresaByStripeCustomerID(customerID string) (*Empresa, error)
 	UpdateEmpresa(e *Empresa) error
 	UpdateSuscripcionStripe(id, subscriptionID string, periodStart, periodEnd time.Time) error
-	ActivarSuscripcionConPlan(id, subscriptionID string, plan Plan) error
+	ActivarSuscripcionConPlan(id, subscriptionID string, plan Plan, conductoresExtra int) error
 	ActualizarEstadoSuscripcion(id string, estado EstadoSuscripcion) error
 	ActualizarConductoresExtra(id string, extra int) error
 	ListEmpresas() ([]*Empresa, error)
@@ -132,8 +132,8 @@ func (r *repository) UpdateSuscripcionStripe(id, subscriptionID string, periodSt
 
 // billing/repository.go
 
-// ActivarSuscripcionConPlan activa la suscripción y actualiza max_conductores según el plan
-func (r *repository) ActivarSuscripcionConPlan(id, subscriptionID string, plan Plan) error {
+// ActivarSuscripcionConPlan - CORREGIDO
+func (r *repository) ActivarSuscripcionConPlan(id, subscriptionID string, plan Plan, conductoresExtra int) error {
     now := time.Now()
     yearEnd := now.AddDate(1, 0, 0)
     maxConductores := LimitesConductores[plan]
@@ -144,11 +144,12 @@ func (r *repository) ActivarSuscripcionConPlan(id, subscriptionID string, plan P
             stripe_subscription_id = $1,
             plan_actual = $2,
             max_conductores = $3,
-            current_period_start = $4,
-            current_period_end = $5,
+            conductores_extra = $4,
+            current_period_start = $5,
+            current_period_end = $6,
             updated_at = NOW()
-        WHERE id = $6`,
-        subscriptionID, plan, maxConductores, now, yearEnd, id)
+        WHERE id = $7`,
+        subscriptionID, plan, maxConductores, conductoresExtra, now, yearEnd, id)
     return err
 }
 

@@ -691,8 +691,15 @@ func (s *Service) handleCheckoutCompletado(event stripe.Event) error {
         plan = PlanBasico // Default
     }
 
+	conductoresExtra := 0
+    for _, item := range sess.LineItems.Data {
+        if item.Price.ID == s.stripeCfg.PriceExtra {
+            conductoresExtra += int(item.Quantity)
+        }
+    }
+
     // Activar suscripción
-    if err := s.repo.ActivarSuscripcionConPlan(empresaID, sess.Subscription.ID, plan); err != nil {
+    if err := s.repo.ActivarSuscripcionConPlan(empresaID, sess.Subscription.ID, plan, conductoresExtra); err != nil {
         return fmt.Errorf("error activando suscripción: %w", err)
     }
 

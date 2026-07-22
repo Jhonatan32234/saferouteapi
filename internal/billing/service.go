@@ -321,7 +321,6 @@ func (s *Service) CambiarPlan(adminID string, req CambiarPlanRequest) error {
         return fmt.Errorf("la suscripción no está activa")
     }
 
-    // ✅ Validar que haya cambios reales
     sinCambioPlan := req.PlanNuevo == empresa.PlanActual
     sinCambioExtra := req.ConductoresExtra == empresa.ConductoresExtra
     
@@ -329,119 +328,63 @@ func (s *Service) CambiarPlan(adminID string, req CambiarPlanRequest) error {
         return fmt.Errorf("no hay cambios en el plan")
     }
 
-    totalConductores, err := s.repo.GetTotalConductoresByEmpresa(empresa.ID)
-    if err != nil {
-        return fmt.Errorf("error contando conductores: %w", err)
-    }
-	log.Print("Total conductores:",totalConductores)
-
+    totalConductores, _ := s.repo.GetTotalConductoresByEmpresa(empresa.ID)
     limiteNuevoPlan := LimitesConductores[req.PlanNuevo]
 
-	log.Print("limite nuevo plan:",limiteNuevoPlan)
-
-    // ✅ Downgrade: Profesional → Básico
-    if req.PlanNuevo == PlanBasico && empresa.PlanActual == PlanProfesional {
-		log.Print("downgrade")
-        conductoresSobrantes := 0
-        if totalConductores > limiteNuevoPlan {
-            conductoresSobrantes = totalConductores - limiteNuevoPlan
-        }
-
-		log.Print("conductores sobrantes:",conductoresSobrantes)
-
-        empresa.PlanActual = PlanBasico
-        empresa.MaxConductores = limiteNuevoPlan
-        empresa.ConductoresExtra = conductoresSobrantes
-
-        if err := s.repo.UpdateEmpresa(empresa); err != nil {
-            return fmt.Errorf("error actualizando empresa: %w", err)
-        }
-
-        if empresa.StripeSubscriptionID != "" && s.stripeCfg != nil {
-            s.actualizarSuscripcionStripe(empresa, conductoresSobrantes)
-        }
-		log.Print("evaluar")
-
-		if conductoresSobrantes > 0 {
-			log.Print("generar factura")
-            ahora := time.Now()
-            yearEnd := ahora.AddDate(1, 0, 0)
-            cargoExtra := float64(conductoresSobrantes) * PrecioConductorExtra
-            
-            factura := &Factura{
-                EmpresaID:             empresa.ID,
-                Subtotal:              cargoExtra,
-                IVA:                   cargoExtra * 0.16,
-                Total:                 cargoExtra * 1.16,
-                Plan:                  PlanBasico,
-                ConductoresBase:       limiteNuevoPlan,
-                ConductoresExtra:      conductoresSobrantes,
-                CargoConductoresExtra: cargoExtra,
-                PeriodoInicio:         &ahora,
-                PeriodoFin:            &yearEnd,
-                Estado:                string(FacturaPendiente),
-            }
-            if err := s.repo.CrearFactura(factura); err != nil {
-                log.Printf("Error creando factura por conductores extra: %v", err)
-            }
-			
-        }
-        _ = s.repo.RegistrarHistorial(empresa.ID, CambioCambioPlan,
-            fmt.Sprintf("Downgrade: Profesional → Básico. %d conductores extra", conductoresSobrantes),
-            map[string]interface{}{
-                "plan_anterior":     "profesional",
-                "plan_nuevo":        "basico",
-                "conductores_extra": conductoresSobrantes,
-            })
-
-        return nil
+    // Calcular conductores sobrantes si es downgrade
+    conductoresSobrantes := 0
+    if req.PlanNuevo == PlanBasico && totalConductores > limiteNuevoPlan {
+        conductoresSobrantes = totalConductores - limiteNuevoPlan
     }
 
-    // ✅ Upgrade: Básico → Profesional
-    if req.PlanNuevo == PlanProfesional && empresa.PlanActual == PlanBasico {
-        // Si los extra caben en el nuevo plan, eliminarlos
-        if empresa.ConductoresExtra > 0 && totalConductores <= limiteNuevoPlan {
-            empresa.ConductoresExtra = 0
-        }
+    // Actualizar BD
+    empresa.PlanActual = req.PlanNuevo
+    empresa.MaxConductores = limiteNuevoPlan
+    empresa.ConductoresExtra = conductoresSobrantes
 
-        empresa.PlanActual = PlanProfesional
-        empresa.MaxConductores = limiteNuevoPlan
-
-        if err := s.repo.UpdateEmpresa(empresa); err != nil {
-            return fmt.Errorf("error actualizando empresa: %w", err)
-        }
-
-        if empresa.StripeSubscriptionID != "" && s.stripeCfg != nil {
-            s.actualizarSuscripcionStripe(empresa, 0)
-        }
-
-        _ = s.repo.RegistrarHistorial(empresa.ID, CambioCambioPlan,
-            "Upgrade: Básico → Profesional",
-            map[string]interface{}{
-                "plan_anterior": "basico",
-                "plan_nuevo":    "profesional",
-            })
-
-        return nil
+    if err := s.repo.UpdateEmpresa(empresa); err != nil {
+        return fmt.Errorf("error actualizando empresa: %w", err)
     }
 
-    // ✅ Mismo plan, solo cambian conductores extra
-    if req.PlanNuevo == empresa.PlanActual {
-        empresa.ConductoresExtra = req.ConductoresExtra
-        if err := s.repo.UpdateEmpresa(empresa); err != nil {
-            return fmt.Errorf("error actualizando conductores extra: %w", err)
-        }
-
-        _ = s.repo.RegistrarHistorial(empresa.ID, CambioAgregarConductor,
-            fmt.Sprintf("Conductores extra actualizados: %d", req.ConductoresExtra),
-            nil)
-
-        return nil
+    // ✅ Stripe se encarga de cobrar la diferencia (prorrata)
+    // El webhook invoice.paid creará la factura en BD
+    if empresa.StripeSubscriptionID != "" && s.stripeCfg != nil {
+        s.actualizarSuscripcionStripe(empresa, conductoresSobrantes)
     }
 
-    return fmt.Errorf("cambio de plan no válido")
+    // ✅ Solo crear factura local si NO hay Stripe (manual)
+    if conductoresSobrantes > 0 && (empresa.StripeSubscriptionID == "" || 
+        strings.HasPrefix(empresa.StripeSubscriptionID, "sub_manual")) {
+        ahora := time.Now()
+        yearEnd := ahora.AddDate(1, 0, 0)
+        cargoExtra := float64(conductoresSobrantes) * PrecioConductorExtra
+        
+        factura := &Factura{
+            EmpresaID:             empresa.ID,
+            Subtotal:              cargoExtra,
+            IVA:                   cargoExtra * 0.16,
+            Total:                 cargoExtra * 1.16,
+            Plan:                  req.PlanNuevo,
+            ConductoresBase:       limiteNuevoPlan,
+            ConductoresExtra:      conductoresSobrantes,
+            CargoConductoresExtra: cargoExtra,
+            PeriodoInicio:         &ahora,
+            PeriodoFin:            &yearEnd,
+            Estado:                string(FacturaPendiente),
+            MetodoPago:            "manual",
+        }
+        if err := s.repo.CrearFactura(factura); err != nil {
+            log.Printf("[FACTURA] Error: %v", err)
+        }
+    }
+
+    _ = s.repo.RegistrarHistorial(empresa.ID, CambioCambioPlan,
+        fmt.Sprintf("Cambio de plan: %s → %s. %d conductores extra", 
+            empresa.PlanActual, req.PlanNuevo, conductoresSobrantes),
+        nil)
+
+    return nil
 }
-
 func (s *Service) actualizarSuscripcionStripe(empresa *Empresa, conductoresExtra int) error {
     if s.stripeCfg == nil || s.stripeCfg.SecretKey == "" {
         log.Println("[STRIPE] No configurado, omitiendo actualización")

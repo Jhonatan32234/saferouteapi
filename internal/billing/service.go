@@ -384,6 +384,7 @@ func (s *Service) CambiarPlan(adminID string, req CambiarPlanRequest) error {
             if err := s.repo.CrearFactura(factura); err != nil {
                 log.Printf("Error creando factura por conductores extra: %v", err)
             }
+			
         }
         _ = s.repo.RegistrarHistorial(empresa.ID, CambioCambioPlan,
             fmt.Sprintf("Downgrade: Profesional → Básico. %d conductores extra", conductoresSobrantes),

@@ -201,25 +201,45 @@ func (r *repository) GetTotalConductoresByEmpresa(empresaID string) (int, error)
 // ─── Facturas ──────────────────────────────────────────────────
 
 func (r *repository) CrearFactura(f *Factura) error {
-	query := `
-		INSERT INTO facturas (
-			empresa_id, stripe_invoice_id, stripe_payment_intent_id,
-			subtotal, iva, total, plan,
-			conductores_base, conductores_extra, cargo_conductores_extra,
-			periodo_inicio, periodo_fin, estado, metodo_pago,
-			fecha_emision, fecha_vencimiento
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15)
-		RETURNING id, fecha_emision`
+    query := `
+        INSERT INTO facturas (
+            empresa_id, stripe_invoice_id, stripe_payment_intent_id,
+            subtotal, iva, total, plan,
+            conductores_base, conductores_extra, cargo_conductores_extra,
+            periodo_inicio, periodo_fin, estado, metodo_pago,
+            fecha_emision, fecha_vencimiento
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15)
+        RETURNING id, fecha_emision`
 
-	fechaVenc := time.Now().Add(30 * 24 * time.Hour)
-	return r.db.QueryRow(
-		query,
-		f.EmpresaID, f.StripeInvoiceID, f.StripePaymentIntentID,
-		f.Subtotal, f.IVA, f.Total, f.Plan,
-		f.ConductoresBase, f.ConductoresExtra, f.CargoConductoresExtra,
-		f.PeriodoInicio, f.PeriodoFin, f.Estado, f.MetodoPago,
-		fechaVenc,
-	).Scan(&f.ID, &f.FechaEmision)
+    fechaVenc := time.Now().Add(30 * 24 * time.Hour)
+    
+    err := r.db.QueryRow(
+        query,
+        f.EmpresaID, 
+        f.StripeInvoiceID, 
+        f.StripePaymentIntentID,
+        f.Subtotal, 
+        f.IVA, 
+        f.Total, 
+        f.Plan,
+        f.ConductoresBase, 
+        f.ConductoresExtra, 
+        f.CargoConductoresExtra,
+        f.PeriodoInicio,   // Puede ser nil → NULL
+        f.PeriodoFin,      // Puede ser nil → NULL
+        f.Estado, 
+        f.MetodoPago,
+        fechaVenc,
+    ).Scan(&f.ID, &f.FechaEmision)
+    
+    if err != nil {
+        log.Printf("[FACTURA] Error creando factura: %v | Datos: empresa=%s plan=%s subtotal=%.2f estado=%s", 
+            err, f.EmpresaID, f.Plan, f.Subtotal, f.Estado)
+        return err
+    }
+    
+    log.Printf("[FACTURA] Creada: %s - %s $%.2f", f.ID, f.Plan, f.Total)
+    return nil
 }
 
 func (r *repository) GetFacturaByID(id string) (*Factura, error) {

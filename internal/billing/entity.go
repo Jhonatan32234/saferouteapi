@@ -153,11 +153,12 @@ type HistorialSuscripcion struct {
 // ─── Request/Response DTOs ─────────────────────────────────────
 
 type CrearEmpresaRequest struct {
-	NombreEmpresa    string `json:"nombre_empresa"`
-	RFC              string `json:"rfc,omitempty"`
-	EmailFacturacion string `json:"email_facturacion,omitempty"`
-	Plan             Plan   `json:"plan"`
-	MetodoPago       string `json:"metodo_pago"`
+    NombreEmpresa    string `json:"nombre_empresa"`
+    RFC              string `json:"rfc,omitempty"`
+    EmailFacturacion string `json:"email_facturacion,omitempty"`
+    Plan             Plan   `json:"plan"`
+    MetodoPago       string `json:"metodo_pago"`
+    ConductoresExtra int    `json:"conductores_extra"`
 }
 
 type CambiarPlanRequest struct {

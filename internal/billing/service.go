@@ -116,7 +116,7 @@ func (s *Service) CrearEmpresa(adminID string, req CrearEmpresaRequest) (*Checko
             PlanActual:        req.Plan,
             EstadoSuscripcion: EstadoPendiente,
             MaxConductores:    LimitesConductores[req.Plan],
-            ConductoresExtra:  0,
+			ConductoresExtra:  req.ConductoresExtra,
         }
         
         if err := s.repo.CrearEmpresa(empresa); err != nil {
@@ -147,7 +147,7 @@ func (s *Service) CrearEmpresa(adminID string, req CrearEmpresaRequest) (*Checko
     }
 
     // Calcular precios
-    subtotal, iva, total := CalcularPrecioTotal(req.Plan, 0)
+    subtotal, iva, total := CalcularPrecioTotal(req.Plan, req.ConductoresExtra)
 
     // Registrar historial
     _ = s.repo.RegistrarHistorial(empresa.ID, CambioCreacion,
@@ -166,8 +166,8 @@ func (s *Service) CrearEmpresa(adminID string, req CrearEmpresaRequest) (*Checko
         Total:                 total,
         Plan:                  req.Plan,
         ConductoresBase:       LimitesConductores[req.Plan],
-        ConductoresExtra:      0,
-        CargoConductoresExtra: 0,
+        ConductoresExtra:      req.ConductoresExtra,
+        CargoConductoresExtra: float64(req.ConductoresExtra)*PrecioConductorExtra,
         PeriodoInicio:         &now,
         PeriodoFin:            &yearEnd,
         Estado:                string(FacturaPendiente),
@@ -234,11 +234,11 @@ func (s *Service) crearCheckoutSession(empresa *Empresa, factura *Factura, metod
 
 	// Agregar conductores extra si aplica
 	if empresa.ConductoresExtra > 0 && s.stripeCfg.PriceExtra != "" {
-		lineItems = append(lineItems, &stripe.CheckoutSessionLineItemParams{
-			Price:    stripe.String(s.stripeCfg.PriceExtra),
-			Quantity: stripe.Int64(int64(empresa.ConductoresExtra)),
-		})
-	}
+        lineItems = append(lineItems, &stripe.CheckoutSessionLineItemParams{
+            Price:    stripe.String(s.stripeCfg.PriceExtra),
+            Quantity: stripe.Int64(int64(empresa.ConductoresExtra)),
+        })
+    }
 
 	successURL := s.stripeCfg.SuccessURL
 	if successURL == "" {

@@ -214,6 +214,8 @@ apiBilling.HandleFunc("/billing/empresa/conductores", billingHandler.AgregarCond
 apiBilling.HandleFunc("/billing/empresa/cancelar", billingHandler.CancelarSuscripcionHandler()).Methods("POST")
 apiBilling.HandleFunc("/billing/facturas", billingHandler.GetFacturasHandler()).Methods("GET")
 apiBilling.HandleFunc("/billing/historial", billingHandler.GetHistorialHandler()).Methods("GET")
+apiBilling.HandleFunc("/billing/empresa/conductores/quitar", billingHandler.QuitarConductoresHandler()).Methods("POST")
+
 
 // ── Rutas de administrador ─────────────────────────────────────────────────
 apiAdmin := api.PathPrefix("/admin").Subrouter()

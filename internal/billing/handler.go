@@ -91,6 +91,45 @@ func (h *Handler) GetMiEmpresaHandler() http.HandlerFunc {
 	}
 }
 
+// QuitarConductoresHandler POST /api/billing/empresa/conductores/quitar
+func (h *Handler) QuitarConductoresHandler() http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        adminID := middleware.GetUserID(r)
+        if adminID == "" {
+            common.WriteError(w, http.StatusUnauthorized, "usuario no autenticado")
+            return
+        }
+
+        tipo := middleware.GetTipo(r)
+        if tipo != "admin" {
+            common.WriteError(w, http.StatusForbidden, "solo administradores")
+            return
+        }
+
+        var req struct {
+            Cantidad int `json:"cantidad"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+            common.WriteError(w, http.StatusBadRequest, "datos inválidos")
+            return
+        }
+
+        if req.Cantidad <= 0 {
+            common.WriteError(w, http.StatusBadRequest, "la cantidad debe ser mayor a 0")
+            return
+        }
+
+        if err := h.svc.QuitarConductores(adminID, req.Cantidad); err != nil {
+            common.WriteError(w, http.StatusBadRequest, err.Error())
+            return
+        }
+
+        common.WriteJSON(w, http.StatusOK, map[string]string{
+            "status": "conductores extra reducidos",
+        })
+    }
+}
+
 // CambiarPlanHandler PUT /api/billing/empresa/cambiar-plan
 func (h *Handler) CambiarPlanHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

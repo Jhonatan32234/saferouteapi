@@ -439,6 +439,51 @@ func (s *Service) actualizarSuscripcionStripe(empresa *Empresa, conductoresExtra
     return nil
 }
 
+
+// QuitarConductores reduce los conductores extra
+func (s *Service) QuitarConductores(adminID string, cantidad int) error {
+    if cantidad <= 0 {
+        return fmt.Errorf("la cantidad debe ser mayor a 0")
+    }
+
+    empresa, err := s.repo.GetEmpresaByAdminID(adminID)
+    if err != nil {
+        return fmt.Errorf("empresa no encontrada")
+    }
+
+    if empresa.EstadoSuscripcion != EstadoActivo {
+        return fmt.Errorf("la suscripción no está activa")
+    }
+
+    if empresa.ConductoresExtra <= 0 {
+        return fmt.Errorf("no tienes conductores extra para quitar")
+    }
+
+    // No quitar más de los que hay
+    if cantidad > empresa.ConductoresExtra {
+        cantidad = empresa.ConductoresExtra
+    }
+
+    nuevoExtra := empresa.ConductoresExtra - cantidad
+
+    // Verificar que no queden más conductores que el límite del plan
+    totalConductores, _ := s.repo.GetTotalConductoresByEmpresa(empresa.ID)
+    limitePlan := empresa.MaxConductores
+    if totalConductores > limitePlan + nuevoExtra {
+        return fmt.Errorf("no puedes quitar conductores extra porque tienes %d conductores activos", totalConductores)
+    }
+
+    if err := s.repo.ActualizarConductoresExtra(empresa.ID, nuevoExtra); err != nil {
+        return fmt.Errorf("error actualizando conductores extra: %w", err)
+    }
+
+    _ = s.repo.RegistrarHistorial(empresa.ID, CambioRemoverConductor,
+        fmt.Sprintf("Se quitaron %d conductores extra (total: %d)", cantidad, nuevoExtra),
+        nil)
+
+    return nil
+}
+
 // ─── Agregar conductores extra ─────────────────────────────────
 
 func (s *Service) AgregarConductores(adminID string, cantidad int) error {

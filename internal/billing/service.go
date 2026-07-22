@@ -345,10 +345,11 @@ func (s *Service) CambiarPlan(adminID string, req CambiarPlanRequest) error {
     if err := s.repo.UpdateEmpresa(empresa); err != nil {
         return fmt.Errorf("error actualizando empresa: %w", err)
     }
-
+	log.Print("conductores sobrantes")
     // ✅ Stripe se encarga de cobrar la diferencia (prorrata)
     // El webhook invoice.paid creará la factura en BD
     if empresa.StripeSubscriptionID != "" && s.stripeCfg != nil {
+		log.Print("llama stripe")
         s.actualizarSuscripcionStripe(empresa, conductoresSobrantes)
     }
 
@@ -387,6 +388,7 @@ func (s *Service) CambiarPlan(adminID string, req CambiarPlanRequest) error {
     return nil
 }
 func (s *Service) actualizarSuscripcionStripe(empresa *Empresa, conductoresExtra int) error {
+	log.Print("conductores extra:",conductoresExtra)
     if s.stripeCfg == nil || s.stripeCfg.SecretKey == "" {
         log.Println("[STRIPE] No configurado, omitiendo actualización")
         return nil

@@ -40,6 +40,8 @@ type Repository interface {
 	ListHistorial(empresaID string, limit int) ([]*HistorialSuscripcion, error)
 	GetEmpresaByStripeSubscriptionID(subID string) (*Empresa, error)
 
+	UpdateFacturaStripeInvoiceID(facturaID, stripeInvoiceID string) error
+
 }
 
 type repository struct {
@@ -106,16 +108,27 @@ func (r *repository) GetEmpresaByStripeCustomerID(customerID string) (*Empresa, 
 		FROM empresas WHERE stripe_customer_id = $1`, customerID))
 }
 
+
+func (r *repository) UpdateFacturaStripeInvoiceID(facturaID, stripeInvoiceID string) error {
+    _, err := r.db.Exec(`
+        UPDATE facturas SET stripe_invoice_id = $1 WHERE id = $2`,
+        stripeInvoiceID, facturaID)
+    return err
+}
+
+
+// billing/repository.go
 func (r *repository) UpdateEmpresa(e *Empresa) error {
-	_, err := r.db.Exec(`
-		UPDATE empresas SET
-			nombre_empresa = $1, rfc = $2, email_facturacion = $3,
-			plan_actual = $4, max_conductores = $5,
-			updated_at = NOW()
-		WHERE id = $6`,
-		e.NombreEmpresa, e.RFC, e.EmailFacturacion,
-		e.PlanActual, e.MaxConductores, e.ID)
-	return err
+    _, err := r.db.Exec(`
+        UPDATE empresas SET
+            nombre_empresa = $1, rfc = $2, email_facturacion = $3,
+            plan_actual = $4, max_conductores = $5,
+            stripe_customer_id = $6,
+            updated_at = NOW()
+        WHERE id = $7`,
+        e.NombreEmpresa, e.RFC, e.EmailFacturacion,
+        e.PlanActual, e.MaxConductores, e.StripeCustomerID, e.ID)
+    return err
 }
 
 func (r *repository) UpdateSuscripcionStripe(id, subscriptionID string, periodStart, periodEnd time.Time) error {

@@ -674,6 +674,7 @@ func (s *Service) handleSuscripcionActualizada(event stripe.Event) error {
     return nil
 }
 
+
 // billing/service.go
 func (s *Service) handleCheckoutCompletado(event stripe.Event) error {
     var sess stripe.CheckoutSession
@@ -689,6 +690,16 @@ func (s *Service) handleCheckoutCompletado(event stripe.Event) error {
 	plan := Plan(sess.Metadata["plan"])
     if plan == "" {
         plan = PlanBasico // Default
+    }
+
+	facturaID := sess.Metadata["factura_id"]
+    if facturaID != "" && sess.Invoice != nil {
+        factura, err := s.repo.GetFacturaByID(facturaID)
+		log.Print(factura)
+        if err == nil {
+            // Actualizar el stripe_invoice_id en la factura local
+            _ = s.repo.UpdateFacturaStripeInvoiceID(facturaID, sess.Invoice.ID)
+        }
     }
 
 	conductoresExtra := 0

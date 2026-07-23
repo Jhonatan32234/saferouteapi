@@ -234,8 +234,6 @@ func ObtenerInfoPlanes() []PlanInfoResponse {
 				"15 conductores incluidos",
 				"Monitoreo en tiempo real",
 				"Reportes básicos de incidentes",
-				"Soporte por email",
-				"1 administrador",
 			},
 		},
 		{
@@ -250,9 +248,6 @@ func ObtenerInfoPlanes() []PlanInfoResponse {
 				"Reportes avanzados con IA",
 				"Predicciones de zonas de riesgo",
 				"Alertas personalizables",
-				"Hasta 3 administradores",
-				"Acceso API",
-				"Soporte prioritario",
 			},
 		},
 	}

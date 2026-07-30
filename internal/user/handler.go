@@ -39,7 +39,7 @@ func (h *Handler) GetUserProfileHandler() http.HandlerFunc {
 }
 
 // GetConductoresEmpresaHandler - Lista conductores de la empresa del admin
-func (h *Handler) GetConductoresEmpresaHandler(billingSvc *billing.Service) http.HandlerFunc {
+func (h *Handler) GetConductoresEmpresaHandler(billingSvc billing.BillingService) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         adminID := middleware.GetUserID(r)
         if adminID == "" {

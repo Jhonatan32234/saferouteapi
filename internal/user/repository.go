@@ -54,11 +54,14 @@ func NewRepository(db *sql.DB, encryptionKey []byte) Repository {
 }
 
 func (r *userRepository) FindByEmail(email string) (*UsuarioEntity, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	emailHash := security.HashEmail(email, r.encryptionKey)
+
 	u := &UsuarioEntity{}
 	err := r.db.QueryRow(
 		`SELECT id, email, password_hash, nombre, tipo, COALESCE(telefono, ''), created_at, updated_at
-		 FROM usuarios WHERE email = $1`,
-		email,
+		 FROM usuarios WHERE email_hash = $1`,
+		emailHash,
 	).Scan(
 		&u.ID, &u.Email, &u.PasswordHash, &u.Nombre,
 		&u.Tipo, &u.Telefono, &u.CreatedAt, &u.UpdatedAt,
@@ -66,145 +69,169 @@ func (r *userRepository) FindByEmail(email string) (*UsuarioEntity, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Desencriptar
 	if err := u.AfterLoad(r.encryptionKey); err != nil {
-		return nil, fmt.Errorf("AfterLoad error: %w", err)
+		log.Printf("[USER-REPO] Error desencriptando usuario %s: %v", u.ID, err)
 	}
+
 	return u, nil
 }
 
 func (r *userRepository) GetConductoresByEmpresa(empresaID string) ([]UserProfile, error) {
-    rows, err := r.db.Query(`
+	rows, err := r.db.Query(`
         SELECT id, email, nombre, tipo, COALESCE(telefono, ''), created_at
         FROM usuarios 
         WHERE empresa_id = $1 AND tipo = 'conductor'
         ORDER BY created_at DESC`, empresaID)
-    if err != nil {
-        return nil, err
-    }
-    defer rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 
-    var conductores []UserProfile
-    for rows.Next() {
-        var u UserProfile
-        if err := rows.Scan(&u.ID, &u.Email, &u.Nombre, &u.Tipo, &u.Telefono, &u.CreatedAt); err != nil {
-            continue
-        }
-        // Desencriptar teléfono
-        if u.Telefono != "" {
-            decrypted, _ := security.Decrypt(u.Telefono, r.encryptionKey)
-            if decrypted != "" {
-                u.Telefono = decrypted
-            }
-        }
-        conductores = append(conductores, u)
-    }
-    return conductores, nil
+	var conductores []UserProfile
+	for rows.Next() {
+		var u UserProfile
+		if err := rows.Scan(&u.ID, &u.Email, &u.Nombre, &u.Tipo, &u.Telefono, &u.CreatedAt); err != nil {
+			continue
+		}
+		// Desencriptar datos
+		if u.Email != "" {
+			decrypted, _ := security.Decrypt(u.Email, r.encryptionKey)
+			if decrypted != "" {
+				u.Email = decrypted
+			}
+		}
+		if u.Nombre != "" {
+			decrypted, _ := security.Decrypt(u.Nombre, r.encryptionKey)
+			if decrypted != "" {
+				u.Nombre = decrypted
+			}
+		}
+		if u.Telefono != "" {
+			decrypted, _ := security.Decrypt(u.Telefono, r.encryptionKey)
+			if decrypted != "" {
+				u.Telefono = decrypted
+			}
+		}
+		conductores = append(conductores, u)
+	}
+	return conductores, nil
 }
 
+
 func (r *userRepository) FindByID(id string) (*UsuarioPerfilConEstadisticas, error) {
-    u := &UsuarioPerfilConEstadisticas{}
-    var ultimoAcceso sql.NullTime
+	u := &UsuarioPerfilConEstadisticas{}
+	var ultimoAcceso sql.NullTime
 
-    err := r.db.QueryRow(
-        `SELECT u.id, u.email, u.password_hash, u.nombre, u.tipo, COALESCE(u.telefono, ''),
-                u.created_at, u.updated_at, u.ultimo_acceso,
-                COALESCE(COUNT(r.id), 0) AS reportes_creados,
-                COALESCE(SUM(CASE WHEN r.confirmaciones > 0 THEN 1 ELSE 0 END), 0) AS reportes_confirmados
-         FROM usuarios u
-         LEFT JOIN reportes r ON r.user_id = u.id
-         WHERE u.id = $1
-         GROUP BY u.id, u.email, u.password_hash, u.nombre, u.tipo, u.telefono,
-                  u.created_at, u.updated_at, u.ultimo_acceso`,
-        id,
-    ).Scan(
-        &u.ID, &u.Email, &u.PasswordHash, &u.Nombre,
-        &u.Tipo, &u.Telefono, &u.CreatedAt, &u.UpdatedAt, &ultimoAcceso,
-        &u.ReportesCreados, &u.ReportesConfirmados,
-    )
-    if err != nil {
-        return nil, err
-    }
+	err := r.db.QueryRow(
+		`SELECT u.id, u.email, u.password_hash, u.nombre, u.tipo, COALESCE(u.telefono, ''),
+		        u.created_at, u.updated_at, u.ultimo_acceso,
+		        COALESCE(COUNT(r.id), 0) AS reportes_creados,
+		        COALESCE(SUM(CASE WHEN r.confirmaciones > 0 THEN 1 ELSE 0 END), 0) AS reportes_confirmados
+		 FROM usuarios u
+		 LEFT JOIN reportes r ON r.user_id = u.id
+		 WHERE u.id = $1
+		 GROUP BY u.id, u.email, u.password_hash, u.nombre, u.tipo, u.telefono,
+		          u.created_at, u.updated_at, u.ultimo_acceso`,
+		id,
+	).Scan(
+		&u.ID, &u.Email, &u.PasswordHash, &u.Nombre,
+		&u.Tipo, &u.Telefono, &u.CreatedAt, &u.UpdatedAt, &ultimoAcceso,
+		&u.ReportesCreados, &u.ReportesConfirmados,
+	)
+	if err != nil {
+		return nil, err
+	}
 
-    if ultimoAcceso.Valid {
-        t := ultimoAcceso.Time
-        u.UltimoAcceso = &t
-    }
+	if ultimoAcceso.Valid {
+		t := ultimoAcceso.Time
+		u.UltimoAcceso = &t
+	}
 
-    if err := u.AfterLoad(r.encryptionKey); err != nil {
-        return nil, fmt.Errorf("AfterLoad error: %w", err)
-    }
+	// Desencriptar
+	if err := u.AfterLoad(r.encryptionKey); err != nil {
+		log.Printf("[USER-REPO] Error desencriptando usuario %s: %v", u.ID, err)
+	}
 
-    return u, nil
+	return u, nil
 }
 
 func (r *userRepository) Create(u *UsuarioEntity) (string, error) {
-    log.Printf("[REPO] Creando usuario - Email: %s, Teléfono antes de BeforeSave: '%s'", 
-        u.Email, u.Telefono)
+	log.Printf("[USER-REPO] Creando usuario - Email: %s, Nombre: %s, Teléfono: %s",
+		u.Email, u.Nombre, u.Telefono)
 
-    if err := u.BeforeSave(r.encryptionKey); err != nil {
-        return "", fmt.Errorf("BeforeSave error: %w", err)
-    }
+	// Encriptar datos sensibles antes de guardar
+	if r.encryptionKey != nil {
+		if err := u.BeforeSave(r.encryptionKey); err != nil {
+			return "", fmt.Errorf("error encriptando datos: %w", err)
+		}
+	}
 
-    log.Printf("[REPO] Teléfono después de BeforeSave: '%s'", u.Telefono)
+	var id string
+	err := r.db.QueryRow(
+		`INSERT INTO usuarios (email, email_hash, password_hash, nombre, tipo, telefono)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 RETURNING id`,
+		u.Email, u.EmailHash, u.PasswordHash, u.Nombre, u.Tipo, u.Telefono,
+	).Scan(&id)
 
-    var id string
-    err := r.db.QueryRow(
-        `INSERT INTO usuarios (email, password_hash, nombre, tipo, telefono)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id`,
-        u.Email, u.PasswordHash, u.Nombre, u.Tipo, u.Telefono,
-    ).Scan(&id)
-    
-    if err != nil {
-        log.Printf("[REPO] Error INSERT: %v", err)
-        return "", err
-    }
+	if err != nil {
+		log.Printf("[USER-REPO] Error INSERT: %v", err)
+		return "", err
+	}
 
-    log.Printf("[REPO] Usuario creado - ID: %s", id)
-    return id, nil
+	log.Printf("[USER-REPO] Usuario creado - ID: %s (datos encriptados)", id)
+	return id, nil
 }
 
+
 func (r *userRepository) Update(u *UsuarioEntity) error {
-    if err := u.BeforeSave(r.encryptionKey); err != nil {
-        return fmt.Errorf("BeforeSave error: %w", err)
-    }
+	// Encriptar antes de actualizar
+	if r.encryptionKey != nil {
+		if err := u.BeforeSave(r.encryptionKey); err != nil {
+			return fmt.Errorf("error encriptando datos: %w", err)
+		}
+	}
 
-    query := "UPDATE usuarios SET updated_at = NOW()"
-    args := []interface{}{}
-    argCount := 0
+	query := "UPDATE usuarios SET updated_at = NOW()"
+	args := []interface{}{}
+	argCount := 0
 
-    if u.Nombre != "" {
-        argCount++
-        query += fmt.Sprintf(", nombre = $%d", argCount)
-        args = append(args, u.Nombre)
-    }
-    
-    argCount++
-    query += fmt.Sprintf(", telefono = NULLIF($%d, '')", argCount)
-    args = append(args, u.Telefono)
-    
-    if u.Email != "" {
-        argCount++
-        query += fmt.Sprintf(", email = $%d", argCount)
-        args = append(args, u.Email)
-    }
+	if u.Nombre != "" {
+		argCount++
+		query += fmt.Sprintf(", nombre = $%d", argCount)
+		args = append(args, u.Nombre)
+	}
 
-    argCount++
-    query += fmt.Sprintf(" WHERE id = $%d", argCount)
-    args = append(args, u.ID)
+	if u.Telefono != "" {
+		argCount++
+		query += fmt.Sprintf(", telefono = $%d", argCount)
+		args = append(args, u.Telefono)
+	}
 
-    log.Printf("[REPO] Update query: %s", query)
-    log.Printf("[REPO] Update args: %v", args)
+	if u.Email != "" {
+		argCount++
+		query += fmt.Sprintf(", email = $%d", argCount)
+		args = append(args, u.Email)
+		argCount++
+		query += fmt.Sprintf(", email_hash = $%d", argCount)
+		args = append(args, u.EmailHash)
+	}
 
-    result, err := r.db.Exec(query, args...)
-    if err != nil {
-        return err
-    }
+	argCount++
+	query += fmt.Sprintf(" WHERE id = $%d", argCount)
+	args = append(args, u.ID)
 
-    rows, _ := result.RowsAffected()
-    log.Printf("[REPO] Filas actualizadas: %d", rows)
-    
-    return nil
+	result, err := r.db.Exec(query, args...)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	log.Printf("[USER-REPO] Filas actualizadas: %d", rows)
+
+	return nil
 }
 
 func (r *userRepository) UpdateLastAccess(userID string) error {
@@ -638,6 +665,14 @@ func (r *userRepository) ListConductors() ([]map[string]interface{}, error) {
 			continue
 		}
 
+		// Desencriptar nombre
+		if nombre != "" {
+			decrypted, _ := security.Decrypt(nombre, r.encryptionKey)
+			if decrypted != "" {
+				nombre = decrypted
+			}
+		}
+
 		precision := 0.0
 		if totalReportes > 0 {
 			precision = float64(reportesConfirmados) / float64(totalReportes) * 100
@@ -685,6 +720,7 @@ func (r *userRepository) ListConductors() ([]map[string]interface{}, error) {
 	return result, nil
 }
 
+
 func mapearTipoConductor(nombre string) string {
 	nombreLower := strings.ToLower(nombre)
 	if strings.Contains(nombreLower, "taxi") || strings.Contains(nombreLower, "taxista") {
@@ -698,7 +734,6 @@ func mapearTipoConductor(nombre string) string {
 	}
 	return "particular"
 }
-
 func round(val float64, precision int) float64 {
 	format := float64(1)
 	for i := 0; i < precision; i++ {

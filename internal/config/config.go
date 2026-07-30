@@ -21,6 +21,7 @@ type Config struct {
 	MotorPrediccionesURL  string
 	EncryptionKey string
 	AuthServiceURL string
+	BillingServiceURL string
 	JWTPublicKey     string
 	ServicePrivateKey string
 
@@ -115,6 +116,12 @@ func Load() (*Config, error) {
         log.Println("AUTH_SERVICE_URL no configurado, usando default:", authServiceURL)
     }
 
+    billingServiceURL := os.Getenv("BILLING_SERVICE_URL")
+    if billingServiceURL == "" {
+        billingServiceURL = "http://localhost:8082"
+        log.Println("BILLING_SERVICE_URL no configurado, usando default:", billingServiceURL)
+    }
+
     jwtPublicKey := os.Getenv("JWT_PUBLIC_KEY")
     servicePrivateKey := os.Getenv("SERVICE_PRIVATE_KEY")
 
@@ -134,6 +141,7 @@ func Load() (*Config, error) {
         MotorPrediccionesURL: motor_predicciones_url,
         EncryptionKey:       encryptionKey,
         AuthServiceURL:      authServiceURL,
+        BillingServiceURL:   billingServiceURL,
         JWTPublicKey:        jwtPublicKey,
         ServicePrivateKey:   servicePrivateKey,
 

@@ -92,19 +92,10 @@ func main() {
 	wsMgr := viaje.NewWebSocketManager(db, viajeSvc, wsAdapter, jwtPublicKey)
 
 	// ── Billing (Facturación / Planes Empresariales) ──────────────────────────
-	billingRepo := billing.NewRepository(db)
-	billingStripeCfg := &billing.StripeConfig{
-		SecretKey:      cfg.StripeSecretKey,
-		WebhookSecret:  cfg.StripeWebhookSecret,
-		PriceBasico:    cfg.StripePriceBasico,
-		PricePro:       cfg.StripePricePro,
-		PriceExtra:     cfg.StripePriceExtra,
-		SuccessURL:     cfg.StripeSuccessURL,
-		CancelURL:      cfg.StripeCancelURL,
-	}
-	billingSvc := billing.NewService(billingRepo, billingStripeCfg)
-	billingMiddleware := middleware.RequireActiveSubscription(billingSvc)
-	billingHandler := billing.NewHandler(billingSvc)
+	// Cliente HTTP para el Billing Service independiente
+	billingClient := billing.NewClient(cfg.BillingServiceURL, cfg.InternalAPIKey, servicePrivateKey)
+	billingMiddleware := middleware.RequireActiveSubscription(billingClient)
+	billingHandler := billing.NewHandler(billingClient)
 
 	// ── Handlers ───────────────────────────────────────────────────────────────
 	authHandler := auth.NewHandler(authSvc, cfg.JWTSecret)
@@ -223,11 +214,11 @@ apiAdmin.Use(middleware.RoleMiddleware(jwtPublicKey, "admin"))
 apiAdmin.Use(billingMiddleware)  // Los admins también necesitan suscripción
 apiAdmin.HandleFunc("/resumen", adminReporteHandler.GetAdminResumenHandler()).Methods("GET")
 apiAdmin.HandleFunc("/buscar", adminReporteHandler.BuscarReportesHandler()).Methods("POST")
-apiAdmin.HandleFunc("/registrar-conductor", authHandler.RegistrarConductorHandler(billingSvc)).Methods("POST")
-apiAdmin.HandleFunc("/viajes/activos", viajeHandler.GetActiveViajesAdminHandler(billingSvc)).Methods("GET")
+apiAdmin.HandleFunc("/registrar-conductor", authHandler.RegistrarConductorHandler(billingClient)).Methods("POST")
+apiAdmin.HandleFunc("/viajes/activos", viajeHandler.GetActiveViajesAdminHandler(billingClient)).Methods("GET")
 apiAdmin.HandleFunc("/notificar-conductor", wsMgr.NotificarConductorHandler()).Methods("POST")
 apiAdmin.HandleFunc("/billing/empresas", billingHandler.AdminListEmpresasHandler()).Methods("GET")
-apiAdmin.HandleFunc("/conductores", userHandler.GetConductoresEmpresaHandler(billingSvc)).Methods("GET")
+apiAdmin.HandleFunc("/conductores", userHandler.GetConductoresEmpresaHandler(billingClient)).Methods("GET")
 apiAdmin.HandleFunc("/conductores/{id}/perfil", motorHandler.GetPerfilConductorHandler()).Methods("GET")
 	// ── Debug ──────────────────────────────────────────────────────────────────
 	r.HandleFunc("/api/debug/websocket", func(w http.ResponseWriter, r *http.Request) {

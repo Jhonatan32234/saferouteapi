@@ -21,6 +21,7 @@ type UpdateProfileRequest struct {
 	Email    string `json:"email,omitempty"`
 }
 
+
 type NotificacionHistorial struct {
     ID           string     `json:"id"`
     UserID       string     `json:"user_id"`

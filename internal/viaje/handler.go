@@ -142,7 +142,7 @@ func (h *Handler) GetActiveViajeHandler() http.HandlerFunc {
 
 
 // GetActiveViajesAdminHandler ahora filtra por empresa del admin
-func (h *Handler) GetActiveViajesAdminHandler(billingSvc *billing.Service) http.HandlerFunc {
+func (h *Handler) GetActiveViajesAdminHandler(billingSvc billing.BillingService) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         adminID := middleware.GetUserID(r)
         if adminID == "" {
